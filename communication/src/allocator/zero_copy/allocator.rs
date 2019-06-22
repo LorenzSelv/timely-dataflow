@@ -9,12 +9,13 @@ use bytes::arc::Bytes;
 use crate::networking::MessageHeader;
 
 use crate::{Allocate, Message, Data, Push, Pull};
-use crate::allocator::AllocateBuilder;
+use crate::allocator::{AllocateBuilder, OnNewPusherFn};
 use crate::allocator::Event;
 use crate::allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
+use core::borrow::Borrow;
 
 /// Builds an instance of a TcpAllocator.
 ///
@@ -87,25 +88,9 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
     /// Builds a `TcpAllocator`, instantiating `Rc<RefCell<_>>` elements.
     pub fn build(self) -> TcpAllocator<A::Allocator> {
 
-        // Fulfill puller obligations.
-        let mut recvs = Vec::with_capacity(self.peers);
-        for promise in self.promises.into_iter() {
-            let buzzer = crate::buzzer::Buzzer::new();
-            let queue = MergeQueue::new(buzzer);
-            promise.send(queue.clone()).expect("Failed to send MergeQueue");
-            recvs.push(queue.clone());
-        }
+        let recvs = self.promises.into_iter().map(fulfill_promise).collect();
 
-        // Extract pusher commitments.
-        let mut sends = Vec::with_capacity(self.peers);
-        for pusher in self.futures.into_iter() {
-            let queue = pusher.recv().expect("Failed to receive push queue");
-            let sendpoint = SendEndpoint::new(queue);
-            sends.push(Rc::new(RefCell::new(sendpoint)));
-        }
-
-        // let sends: Vec<_> = self.sends.into_iter().map(
-        //     |send| Rc::new(RefCell::new(SendEndpoint::new(send)))).collect();
+        let sends = self.futures.into_iter().map(extract_future).collect();
 
         TcpAllocator {
             inner: self.inner.build(),
@@ -117,9 +102,29 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             recvs,
             to_local: HashMap::new(),
             rescaler_rx: self.rescaler_rx,
+            channels: Vec::new(),
         }
     }
 }
+
+fn fulfill_promise(promise: Sender<MergeQueue>) -> MergeQueue {
+    let buzzer = crate::buzzer::Buzzer::new();
+    let queue = MergeQueue::new(buzzer);
+    promise.send(queue.clone()).expect("Failed to send MergeQueue");
+    queue
+}
+
+fn extract_future(future: Receiver<MergeQueue>) -> Rc<RefCell<SendEndpoint<MergeQueue>>> {
+    let queue = future.recv().expect("Failed to receive push queue");
+    let sendpoint = SendEndpoint::new(queue);
+    Rc::new(RefCell::new(sendpoint))
+}
+
+/// A trait with no generic type `T` so that on_new_pusher closures can be stored as Box<dyn OnNewPusher> in the same Vec
+//trait OnNewPusher {}
+//impl <T: 'static> OnNewPusherFn<T> for OnNewPusher {} // TODO static?
+
+trait SizedData : Data + Sized {}
 
 /// A TCP-based allocator for inter-process communication.
 pub struct TcpAllocator<A: Allocate> {
@@ -139,19 +144,34 @@ pub struct TcpAllocator<A: Allocate> {
 
     // TODO(lorenzo) doc
     rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
+
+    // store channels allocated so far, so that we can back-fill them with
+    // new pushers when a new worker process joins the cluster
+    channels: Vec<(usize, Box<dyn OnNewPusherFn<SizedData>>)>,
 }
 
 impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Data>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
-
-        // Result list of boxed pushers.
-        let mut pushes = Vec::<Box<Push<Message<T>>>>::new();
-
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+        where F: OnNewPusherFn<T>
+    {
         // Inner exchange allocations.
         let inner_peers = self.inner.peers();
-        let (mut inner_sends, inner_recv) = self.inner.allocate(identifier);
+
+        // Create an `on_new_pusher` closure which will be repeatedly called by the `allocate` function;
+        // the inner allocator will not store the closure, as intra-process channels do not change over time.
+        let inner_sends1 = Rc::new(RefCell::new(Vec::with_capacity(inner_peers)));
+        let inner_sends2 = Rc::clone(&inner_sends1);
+
+        let on_new_pusher = move |pusher| {
+            inner_sends1.borrow_mut().push(pusher);
+        };
+
+        let inner_recv = self.inner.allocate(identifier, on_new_pusher);
+
+        // now inner had been filled-up
+        let mut inner_sends = inner_sends1.borrow_mut();
 
         for target_index in 0 .. self.peers() {
 
@@ -159,7 +179,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             let mut process_id = target_index / inner_peers;
 
             if process_id == self.index / inner_peers {
-                pushes.push(inner_sends.remove(0));
+                on_new_pusher(inner_sends.remove(0));
             }
             else {
                 // message header template.
@@ -173,7 +193,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
                 // create, box, and stash new process_binary pusher.
                 if process_id > self.index / inner_peers { process_id -= 1; }
-                pushes.push(Box::new(Pusher::new(header, self.sends[process_id].clone())));
+                on_new_pusher(Box::new(Pusher::new(header, self.sends[process_id].clone())));
             }
         }
 
@@ -187,11 +207,50 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         let canary = Canary::new(identifier, self.canaries.clone());
         let puller = Box::new(CountPuller::new(PullerInner::new(inner_recv, channel, canary), identifier, self.events().clone()));
 
-        (pushes, puller, )
+        puller
     }
 
+    // TODO(lorenzo) doc
     fn rescale(&mut self) {
-        // TODO
+        if let Some(rescaler_rx) = &self.rescaler_rx {
+
+            if let Ok((promise, future)) = rescaler_rx.try_recv() {
+
+                // update recvs and sends
+                self.recvs.push(fulfill_promise(promise));
+
+                let new_send = extract_future(future);
+                self.sends.push(new_send.clone());
+
+                let threads = self.inner.peers();
+
+                // back-fill existing channels with `threads` new pushers pointing to the new send
+                for (channel_id, on_new_pusher) in self.channels.iter() {
+
+                    let on_new_pusher: &OnNewPusherFn<Data> = on_new_pusher.borrow();
+
+                    // ASSUMPTION: if there are currently P processes, then
+                    //             current processes have indexes [0..P-1]
+                    //             and the new process has index P
+                    //
+                    // This will not be true when we allow an arbitrary worker to leave the cluster
+
+                    (0..threads).map(|thread_idx| {
+                        let header = MessageHeader {
+                            channel: *channel_id,
+                            source: self.index,
+                            target: self.peers + thread_idx, // see assumption above
+                            length: 0,
+                            seqno: 0,
+                        };
+                        on_new_pusher(Box::new(Pusher::new(header, new_send.clone())));
+                    });
+                }
+
+                // the new process adds `threads` new workers to the cluster
+                self.peers += threads;
+            }
+        }
     }
 
     // Perform preparatory work, most likely reading binary buffers from self.recv.

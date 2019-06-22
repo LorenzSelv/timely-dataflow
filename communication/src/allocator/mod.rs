@@ -35,6 +35,12 @@ pub trait AllocateBuilder : Send {
     fn build(self) -> Self::Allocator;
 }
 
+// TODO(lorenzo) doc
+
+/// A closure type to back-fill existing channels when a new worker process joins the cluster
+pub trait OnNewPusherFn<T>: Fn(Box<Push<Message<T>>>) + 'static {}
+impl<T,                  F: Fn(Box<Push<Message<T>>>) + 'static> OnNewPusherFn<T> for F {}
+
 /// A type capable of allocating channels.
 ///
 /// There is some feature creep, in that this contains several convenience methods about the nature
@@ -45,7 +51,8 @@ pub trait Allocate {
     /// The number of workers in the communication group.
     fn peers(&self) -> usize;
     /// Constructs several send endpoints and one receive endpoint.
-    fn allocate<T: Data>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>);
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+         where F: OnNewPusherFn<T>;
 
     /// If the allocator supports rescaling (atm only TcpAllocator does) and a worker
     /// joined the cluster, then back-fill all existing allocation with the new pusher

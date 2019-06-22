@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::time::Duration;
 use std::collections::VecDeque;
 
-use crate::allocator::{Allocate, AllocateBuilder, Event};
+use crate::allocator::{Allocate, AllocateBuilder, Event, OnNewPusherFn};
 use crate::allocator::counters::Pusher as CountPusher;
 use crate::allocator::counters::Puller as CountPuller;
 use crate::{Push, Pull, Message};
@@ -28,9 +28,12 @@ pub struct Thread {
 impl Allocate for Thread {
     fn index(&self) -> usize { 0 }
     fn peers(&self) -> usize { 1 }
-    fn allocate<T: 'static>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
+    fn allocate<T: 'static, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+            where F: OnNewPusherFn<T>
+    {
         let (pusher, puller) = Thread::new_from(identifier, self.events.clone());
-        (vec![Box::new(pusher)], Box::new(puller))
+        on_new_pusher(Box::new(pusher));
+        Box::new(puller)
     }
     fn events(&self) -> &Rc<RefCell<VecDeque<(usize, Event)>>> {
         &self.events

@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use crate::allocator::thread::ThreadBuilder;
 use crate::allocator::process::ProcessBuilder as TypedProcessBuilder;
-use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process};
+use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process, OnNewPusherFn};
 use crate::allocator::zero_copy::allocator_process::{ProcessBuilder, ProcessAllocator};
 use crate::allocator::zero_copy::allocator::{TcpBuilder, TcpAllocator};
 
@@ -48,12 +48,14 @@ impl Generic {
         }
     }
     /// Constructs several send endpoints and one receive endpoint.
-    fn allocate<T: Data>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+        where F: OnNewPusherFn<T>
+    {
         match self {
-            &mut Generic::Thread(ref mut t) => t.allocate(identifier),
-            &mut Generic::Process(ref mut p) => p.allocate(identifier),
-            &mut Generic::ProcessBinary(ref mut pb) => pb.allocate(identifier),
-            &mut Generic::ZeroCopy(ref mut z) => z.allocate(identifier),
+            &mut Generic::Thread(ref mut t) => t.allocate(identifier, on_new_pusher),
+            &mut Generic::Process(ref mut p) => p.allocate(identifier, on_new_pusher),
+            &mut Generic::ProcessBinary(ref mut pb) => pb.allocate(identifier, on_new_pusher),
+            &mut Generic::ZeroCopy(ref mut z) => z.allocate(identifier, on_new_pusher),
         }
     }
     /// Perform work before scheduling operators.
@@ -87,8 +89,10 @@ impl Generic {
 impl Allocate for Generic {
     fn index(&self) -> usize { self.index() }
     fn peers(&self) -> usize { self.peers() }
-    fn allocate<T: Data>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
-        self.allocate(identifier)
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+        where F: OnNewPusherFn<T>
+    {
+        self.allocate(identifier, on_new_pusher)
     }
 
     fn receive(&mut self) { self.receive(); }

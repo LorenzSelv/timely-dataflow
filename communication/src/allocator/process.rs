@@ -9,7 +9,7 @@ use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 
 use crate::allocator::thread::{ThreadBuilder};
-use crate::allocator::{Allocate, AllocateBuilder, Event, Thread};
+use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, OnNewPusherFn};
 use crate::{Push, Pull, Message};
 use crate::buzzer::Buzzer;
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
@@ -111,8 +111,9 @@ impl Process {
 impl Allocate for Process {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Any+Send+Sync+'static>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
-
+    fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+        where F: OnNewPusherFn<T>
+    {
         // this is race-y global initialisation of all channels for all workers, performed by the
         // first worker that enters this critical section
 
@@ -163,16 +164,15 @@ impl Allocate for Process {
         use crate::allocator::counters::ArcPusher as CountPusher;
         use crate::allocator::counters::Puller as CountPuller;
 
-        let sends =
         sends.into_iter()
              .enumerate()
              .map(|(i,s)| CountPusher::new(s, identifier, self.counters_send[i].clone()))
              .map(|s| Box::new(s) as Box<Push<super::Message<T>>>)
-             .collect::<Vec<_>>();
+             .for_each(move |pusher| on_new_pusher(pusher));
 
         let recv = Box::new(CountPuller::new(recv, identifier, self.inner.events().clone())) as Box<Pull<super::Message<T>>>;
 
-        (sends, recv)
+        recv
     }
 
     fn events(&self) -> &Rc<RefCell<VecDeque<(usize, Event)>>> {

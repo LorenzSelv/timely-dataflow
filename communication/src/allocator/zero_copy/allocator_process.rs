@@ -10,7 +10,7 @@ use bytes::arc::Bytes;
 use crate::networking::MessageHeader;
 
 use crate::{Allocate, Message, Data, Push, Pull};
-use crate::allocator::{AllocateBuilder, Event};
+use crate::allocator::{AllocateBuilder, Event, OnNewPusherFn};
 use crate::allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
@@ -119,10 +119,9 @@ pub struct ProcessAllocator {
 impl Allocate for ProcessAllocator {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Data>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
-
-        let mut pushes = Vec::<Box<Push<Message<T>>>>::new();
-
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+        where F: OnNewPusherFn<T>
+    {
         for target_index in 0 .. self.peers() {
 
             // message header template.
@@ -135,7 +134,7 @@ impl Allocate for ProcessAllocator {
             };
 
             // create, box, and stash new process_binary pusher.
-            pushes.push(Box::new(Pusher::new(header, self.sends[target_index].clone())));
+            on_new_pusher(Box::new(Pusher::new(header, self.sends[target_index].clone())));
         }
 
         let channel =
@@ -148,7 +147,7 @@ impl Allocate for ProcessAllocator {
         let canary = Canary::new(identifier, self.canaries.clone());
         let puller = Box::new(CountPuller::new(Puller::new(channel, canary), identifier, self.events().clone()));
 
-        (pushes, puller)
+        puller
     }
 
     // Perform preparatory work, most likely reading binary buffers from self.recv.
