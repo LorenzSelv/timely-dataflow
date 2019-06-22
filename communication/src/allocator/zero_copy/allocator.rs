@@ -28,6 +28,9 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     peers:  usize,                      // number of peer allocators.
     futures:   Vec<Receiver<MergeQueue>>,  // to receive queues to each network thread.
     promises:   Vec<Sender<MergeQueue>>,    // to send queues from each network thread.
+
+    // TODO(lorenzo) doc
+    rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
 }
 
 /// Creates a vector of builders, sharing appropriate state.
@@ -42,10 +45,12 @@ pub struct TcpBuilder<A: AllocateBuilder> {
 ///   info to spawn ingress comm thresds,
 /// )
 /// ```
+// TODO(lorenzo) format long functions like this
 pub fn new_vector<A: AllocateBuilder>(
     allocators: Vec<A>,
     my_process: usize,
-    processes: usize)
+    processes: usize,
+    rescaler_rxs: Vec<Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>>)
 -> (Vec<TcpBuilder<A>>,
     Vec<Vec<Sender<MergeQueue>>>,
     Vec<Vec<Receiver<MergeQueue>>>)
@@ -61,14 +66,16 @@ pub fn new_vector<A: AllocateBuilder>(
         .into_iter()
         .zip(worker_promises)
         .zip(worker_futures)
+        .zip(rescaler_rxs)
         .enumerate()
-        .map(|(index, ((inner, promises), futures))| {
+        .map(|(index, (((inner, promises), futures), rescaler_rx))| {
             TcpBuilder {
                 inner,
                 index: my_process * threads + index,
                 peers: threads * processes,
                 promises,
                 futures,
+                rescaler_rx,
             }})
         .collect();
 
@@ -109,6 +116,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             sends,
             recvs,
             to_local: HashMap::new(),
+            rescaler_rx: self.rescaler_rx,
         }
     }
 }
@@ -128,6 +136,9 @@ pub struct TcpAllocator<A: Allocate> {
     sends:      Vec<Rc<RefCell<SendEndpoint<MergeQueue>>>>,     // sends[x] -> goes to process x.
     recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
+
+    // TODO(lorenzo) doc
+    rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
 }
 
 impl<A: Allocate> Allocate for TcpAllocator<A> {
@@ -177,6 +188,10 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         let puller = Box::new(CountPuller::new(PullerInner::new(inner_recv, channel, canary), identifier, self.events().clone()));
 
         (pushes, puller, )
+    }
+
+    fn rescale(&mut self) {
+        // TODO
     }
 
     // Perform preparatory work, most likely reading binary buffers from self.recv.

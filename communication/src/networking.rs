@@ -112,18 +112,24 @@ pub fn await_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bo
 
     for _ in (my_index + 1) .. addresses.len() {
         let mut stream = listener.accept()?.0;
-        stream.set_nodelay(true).expect("set_nodelay call failed");
-        let mut buffer = [0u8;16];
-        stream.read_exact(&mut buffer)?;
-        let (magic, mut buffer) = unsafe { decode::<u64>(&mut buffer) }.expect("failed to decode magic");
-        if magic != &HANDSHAKE_MAGIC {
-            return Err(io::Error::new(io::ErrorKind::InvalidData,
-                "received incorrect timely handshake"));
-        }
-        let identifier = unsafe { decode::<u64>(&mut buffer) }.expect("failed to decode worker index").0.clone() as usize;
+        let identifier = recv_handshake(&mut stream)?;
         results[identifier - my_index - 1] = Some(stream);
         if noisy { println!("worker {}:\tconnection from worker {}", my_index, identifier); }
     }
 
     Ok(results)
+}
+
+/// Perform receiver handshake protocol and return sender identifier
+pub fn recv_handshake(stream: &mut TcpStream) -> Result<usize> {
+    stream.set_nodelay(true).expect("set_nodelay call failed");
+    let mut buffer = [0u8;16];
+    stream.read_exact(&mut buffer)?;
+    let (magic, mut buffer) = unsafe { decode::<u64>(&mut buffer) }.expect("failed to decode magic");
+    if magic != &HANDSHAKE_MAGIC {
+        return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                  "received incorrect timely handshake"));
+    }
+    let identifier = unsafe { decode::<u64>(&mut buffer) }.expect("failed to decode worker index").0.clone() as usize;
+    Ok(identifier)
 }

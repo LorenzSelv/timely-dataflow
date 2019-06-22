@@ -31,6 +31,14 @@ impl Drop for CommsGuard {
 
 use crate::logging::{CommunicationSetup, CommunicationEvent};
 use logging_core::Logger;
+use std::net::TcpStream;
+use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
+use std::sync::mpsc::{Sender, Receiver};
+use std::thread::JoinHandle;
+use std::io::Error;
+
+/// Returns a logger for communication events
+pub type LogSender = Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>;
 
 /// Initializes network connections
 pub fn initialize_networking(
@@ -38,18 +46,39 @@ pub fn initialize_networking(
     my_index: usize,
     threads: usize,
     noisy: bool,
-    log_sender: Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>)
+    log_sender: LogSender)
 -> ::std::io::Result<(Vec<TcpBuilder<ProcessBuilder>>, CommsGuard)>
 {
     let log_sender = Arc::new(log_sender);
     let processes = addresses.len();
 
+    let my_address = addresses[my_index].clone();
+
     // one per process (including local, which would be None)
     let mut results: Vec<Option<::std::net::TcpStream>> =
         create_sockets(addresses, my_index, noisy)?;
 
+    let log_sender_clone = log_sender.clone();
+
+    let (rescaler_txs, rescaler_rxs) =
+        (0..threads)
+            .map(|_| {
+                let (tx, rx) = std::sync::mpsc::channel();
+                (tx, Some(rx))
+            })
+            .unzip();
+
+    // TODO maybe keep the handle of the acceptor thread?
+    std::thread::spawn(move || {
+        crate::rescaling::rescaler(my_index,
+                                   my_address,
+                                   threads,
+                                   log_sender_clone,
+                                   rescaler_txs);
+    });
+
     let process_allocators = crate::allocator::process::Process::new_vector(threads);
-    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes);
+    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, rescaler_rxs);
 
     let mut promises_iter = promises.into_iter();
     let mut futures_iter = futures.into_iter();
@@ -61,53 +90,47 @@ pub fn initialize_networking(
     for index in 0..results.len() {
 
         if let Some(stream) = results[index].take() {
-            // remote process
-
             let remote_recv = promises_iter.next().unwrap();
-
-            {
-                let log_sender = log_sender.clone();
-                let stream = stream.try_clone()?;
-                let join_guard =
-                ::std::thread::Builder::new()
-                    .name(format!("send thread {}", index))
-                    .spawn(move || {
-
-                        let logger = log_sender(CommunicationSetup {
-                            process: my_index,
-                            sender: true,
-                            remote: Some(index),
-                        });
-
-                        send_loop(stream, remote_recv, my_index, index, logger);
-                    })?;
-
-                send_guards.push(join_guard);
-            }
+            let send_guard = spawn_send_thread(my_index, index, stream.try_clone()?, log_sender.clone(), remote_recv)?;
+            send_guards.push(send_guard);
 
             let remote_send = futures_iter.next().unwrap();
-
-            {
-                // let remote_sends = remote_sends.clone();
-                let log_sender = log_sender.clone();
-                let stream = stream.try_clone()?;
-                let join_guard =
-                ::std::thread::Builder::new()
-                    .name(format!("recv thread {}", index))
-                    .spawn(move || {
-                        let logger = log_sender(CommunicationSetup {
-                            process: my_index,
-                            sender: false,
-                            remote: Some(index),
-                        });
-                        recv_loop(stream, remote_send, threads * my_index, my_index, index, logger);
-                    })?;
-
-                recv_guards.push(join_guard);
-            }
-
+            let recv_guard = spawn_recv_thread(my_index, index, stream.try_clone()?, log_sender.clone(), remote_send, threads)?;
+            recv_guards.push(recv_guard);
         }
     }
 
     Ok((builders, CommsGuard { send_guards, recv_guards }))
+}
+
+/// send thread for communication to process `remote_index`
+pub fn spawn_send_thread(my_index: usize, remote_index: usize, stream: TcpStream, log_sender: Arc<LogSender>, remote_recv: Vec<Sender<MergeQueue>>)
+        -> Result<JoinHandle<()>, std::io::Error>
+{
+    ::std::thread::Builder::new()
+        .name(format!("send thread {}", remote_index))
+        .spawn(move || {
+            let logger = log_sender(CommunicationSetup {
+            process: my_index,
+            sender: true,
+            remote: Some(remote_index),
+            });
+            send_loop(stream, remote_recv, my_index, remote_index, logger);
+        })
+}
+
+/// recv thread for communication from process `remote_index`
+pub fn spawn_recv_thread(my_index: usize, remote_index: usize, stream: TcpStream, log_sender: Arc<LogSender>, remote_send: Vec<Receiver<MergeQueue>>, threads: usize)
+        -> Result<JoinHandle<()>, std::io::Error>
+{
+    ::std::thread::Builder::new()
+        .name(format!("recv thread {}", remote_index))
+        .spawn(move || {
+            let logger = log_sender(CommunicationSetup {
+                process: my_index,
+                sender: false,
+                remote: Some(remote_index),
+            });
+            recv_loop(stream, remote_send, threads * my_index, my_index, remote_index, logger);
+        })
 }

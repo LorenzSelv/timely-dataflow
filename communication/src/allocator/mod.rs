@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::time::Duration;
 use std::collections::VecDeque;
+use std::sync::mpsc::{Sender, Receiver};
 
 pub use self::thread::Thread;
 pub use self::process::Process;
@@ -19,6 +20,7 @@ pub mod counters;
 pub mod zero_copy;
 
 use crate::{Data, Push, Pull, Message};
+use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 
 /// A proto-allocator, which implements `Send` and can be completed with `build`.
 ///
@@ -44,6 +46,11 @@ pub trait Allocate {
     fn peers(&self) -> usize;
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data>(&mut self, identifier: usize) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>);
+
+    /// If the allocator supports rescaling (atm only TcpAllocator does) and a worker
+    /// joined the cluster, then back-fill all existing allocation with the new pusher
+    fn rescale(&mut self) { /* nop by default */ }
+
     /// A shared queue of communication events with channel identifier.
     ///
     /// It is expected that users of the channel allocator will regularly

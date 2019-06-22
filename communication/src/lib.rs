@@ -94,6 +94,7 @@ pub mod initialize;
 pub mod logging;
 pub mod message;
 pub mod buzzer;
+pub mod rescaling;
 
 use std::any::Any;
 

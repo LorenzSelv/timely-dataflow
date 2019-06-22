@@ -209,7 +209,7 @@ pub fn initialize<T:Send+'static, F: Fn(Generic)->T+Send+Sync+'static>(
 /// use timely_communication::Allocate;
 ///
 /// // configure for two threads, just one process.
-/// let builders = timely_communication::allocator::process::Process::new_vector(2);
+/// let builders = timely_communication::allocator::process::Process::new_vector(2, None);
 ///
 /// // initializes communication, spawns workers
 /// let guards = timely_communication::initialize_from(builders, Box::new(()), |mut allocator| {

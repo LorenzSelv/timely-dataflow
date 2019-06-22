@@ -175,6 +175,9 @@ impl<A: Allocate> Worker<A> {
 
         {   // Process channel events. Activate responders.
             let mut allocator = self.allocator.borrow_mut();
+            // If a new worker joined the cluster, back-fill all allocated channels (nop otherwise)
+            // TODO(lorenzo) is this a good place to rescale? more often? less often?
+            allocator.rescale();
             allocator.receive();
             let events = allocator.events().clone();
             let mut borrow = events.borrow_mut();
