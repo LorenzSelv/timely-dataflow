@@ -34,7 +34,7 @@ impl<T: Clone, D, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64>  Exchange<T, D, 
     fn flush(&mut self, index: usize) {
         if !self.buffers[index].is_empty() {
             if let Some(ref time) = self.current {
-                Message::push_at(&mut self.buffers[index], time.clone(), &mut self.pushers.borrow()[index]);
+                Message::push_at(&mut self.buffers[index], time.clone(), &mut self.pushers.borrow_mut()[index]);
             }
         }
     }
@@ -47,19 +47,21 @@ impl<T: Eq+Data, D: Data, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64> Push<Bun
         // A `rescale` operation might have happened since the last call to push.
         // In that case, the `pushers` vector has been back-filled with the new pusher.
         // We need to allocate buffers for the new pushers.
-        let pushers = self.pushers.borrow();
+        // let mut pushers = self.pushers.borrow_mut();
 
-        while self.buffers.len() < pushers.len() {
+        let pushers_len = self.pushers.borrow().len();
+
+        while self.buffers.len() < pushers_len {
             self.buffers.push(Vec::with_capacity(Message::<T, D>::default_length()));
         }
 
-        debug_assert_eq!(self.buffers.len(), pushers.len());
+        debug_assert_eq!(self.buffers.len(), pushers_len);
 
         // TODO(lorenzo) change below to use a routing table
 
         // if only one pusher, no exchange
-        if pushers.len() == 1 {
-            pushers[0].push(message);
+        if pushers_len == 1 {
+            self.pushers.borrow_mut()[0].push(message);
         }
         else if let Some(message) = message {
 
@@ -69,15 +71,15 @@ impl<T: Eq+Data, D: Data, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64> Push<Bun
 
             // if the time isn't right, flush everything.
             if self.current.as_ref().map_or(false, |x| x != time) {
-                for index in 0..pushers.len() {
+                for index in 0..pushers_len {
                     self.flush(index);
                 }
             }
             self.current = Some(time.clone());
 
             // if the number of pushers is a power of two, use a mask
-            if (pushers.len() & (pushers.len() - 1)) == 0 {
-                let mask = (pushers.len() - 1) as u64;
+            if (pushers_len & (pushers_len - 1)) == 0 {
+                let mask = (pushers_len - 1) as u64;
                 for datum in data.drain(..) {
                     let index = (((self.hash_func)(time, &datum)) & mask) as usize;
 
@@ -98,7 +100,7 @@ impl<T: Eq+Data, D: Data, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64> Push<Bun
             // as a last resort, use mod (%)
             else {
                 for datum in data.drain(..) {
-                    let index = (((self.hash_func)(time, &datum)) % pushers.len() as u64) as usize;
+                    let index = (((self.hash_func)(time, &datum)) % pushers_len as u64) as usize;
                     self.buffers[index].push(datum);
                     if self.buffers[index].len() == self.buffers[index].capacity() {
                         self.flush(index);
@@ -109,9 +111,9 @@ impl<T: Eq+Data, D: Data, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64> Push<Bun
         }
         else {
             // flush
-            for index in 0..pushers.len() {
+            for index in 0..pushers_len {
                 self.flush(index);
-                pushers[index].push(&mut None);
+                self.pushers.borrow_mut()[index].push(&mut None);
             }
         }
     }

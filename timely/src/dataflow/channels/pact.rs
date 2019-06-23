@@ -19,7 +19,6 @@ use super::{Bundle, Message};
 use crate::logging::TimelyLogger as Logger;
 use std::cell::RefCell;
 use std::rc::Rc;
-use rand::distributions::uniform::SampleBorrow;
 
 /// A `ParallelizationContract` allocates paired `Push` and `Pull` implementors.
 pub trait ParallelizationContract<T: 'static, D: 'static> {
@@ -67,10 +66,13 @@ impl<T: Eq+Data+Clone, D: Data+Clone, F: FnMut(&D)->u64+'static> Parallelization
         let pushers1 = Rc::new(RefCell::new(Vec::with_capacity(allocator.peers())));
         let pushers2 = Rc::clone(&pushers1);
 
-        let mut target_idx = 0;
+        let source_idx = allocator.index();
+        let /*mut*/ target_idx = 0; // TODO(lorenzo) should it be `peers` instead?
+        let logging_clone = logging.clone();
         let on_new_pusher = move |pusher| {
-            let pusher = LogPusher::new(pusher, allocator.index(), target_idx, identifier, logging.clone());
-            pushers1.borrow().push(pusher);
+            let pusher = LogPusher::new(pusher, source_idx, target_idx, identifier, logging_clone.clone());
+            //target_idx += 1;
+            pushers1.borrow_mut().push(pusher);
         };
 
         let receiver = allocator.allocate::<Message<T, D>, _>(identifier, address, on_new_pusher);

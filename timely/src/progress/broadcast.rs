@@ -80,7 +80,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 internal: Vec::new(),
             }));
 
-            for pusher in self.pushers.borrow().iter_mut() {
+            for pusher in self.pushers.borrow_mut().iter_mut() {
 
                 // Attempt to re-use allocations, if possible.
                 if let Some(tuple) = &mut self.to_push {
