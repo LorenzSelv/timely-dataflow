@@ -56,7 +56,7 @@ pub trait Allocate {
          where F: OnNewPushFn<T>;
 
     /// If the allocator supports rescaling (atm only TcpAllocator does) and a worker
-    /// joined the cluster, then back-fill all existing allocation with the new pusher
+    /// joined the cluster, then back-fill all existing allocation with the new pushers
     fn rescale(&mut self) { /* nop by default */ }
 
     /// A shared queue of communication events with channel identifier.

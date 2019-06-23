@@ -58,6 +58,16 @@ impl Generic {
             &mut Generic::ZeroCopy(ref mut z) => z.allocate(identifier, on_new_pusher),
         }
     }
+    /// TODO(lorenzo)
+    fn rescale(&mut self) {
+        match self {
+            &mut Generic::Thread(ref mut t) => t.rescale(),
+            &mut Generic::Process(ref mut p) => p.rescale(),
+            &mut Generic::ProcessBinary(ref mut pb) => pb.rescale(),
+            &mut Generic::ZeroCopy(ref mut z) => z.rescale(),
+        }
+    }
+
     /// Perform work before scheduling operators.
     fn receive(&mut self) {
         match self {
@@ -93,6 +103,10 @@ impl Allocate for Generic {
         where F: OnNewPushFn<T>
     {
         self.allocate(identifier, on_new_pusher)
+    }
+
+    fn rescale(&mut self) {
+        self.rescale();
     }
 
     fn receive(&mut self) { self.receive(); }
