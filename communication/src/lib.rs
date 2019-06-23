@@ -18,6 +18,9 @@
 //! ```
 //! use timely_communication::Allocate;
 //!
+//! use std::rc::Rc;
+//! use core::cell::RefCell;
+//!
 //! // configure for two threads, just one process.
 //! let config = timely_communication::Configuration::Process(2);
 //!
@@ -25,8 +28,16 @@
 //! let guards = timely_communication::initialize(config, |mut allocator| {
 //!     println!("worker {} started", allocator.index());
 //!
+//!     let senders1 = Rc::new(RefCell::new(Vec::new()));
+//!     let senders2 = Rc::clone(&senders1);
+//!
+//!     let on_new_pusher = move |pusher| {
+//!         senders1.borrow_mut().push(pusher);
+//!     };
+//!
 //!     // allocates pair of senders list and one receiver.
-//!     let (mut senders, mut receiver) = allocator.allocate(0);
+//!     let mut receiver = allocator.allocate(0, on_new_pusher);
+//!     let mut senders = senders2.borrow_mut();
 //!
 //!     // send typed data along each channel
 //!     use timely_communication::Message;

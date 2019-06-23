@@ -136,6 +136,9 @@ impl Configuration {
 /// ```
 /// use timely_communication::Allocate;
 ///
+/// use std::rc::Rc;
+/// use std::cell::RefCell;
+///
 /// // configure for two threads, just one process.
 /// let config = timely_communication::Configuration::Process(2);
 ///
@@ -143,8 +146,18 @@ impl Configuration {
 /// let guards = timely_communication::initialize(config, |mut allocator| {
 ///     println!("worker {} started", allocator.index());
 ///
+///     // allocate senders and receiver
+///     let senders1 = Rc::new(RefCell::new(Vec::new()));
+///     let senders2 = Rc::clone(&senders1);
+///
+///     let on_new_pusher = move |pusher| {
+///         senders1.borrow_mut().push(pusher);
+///     };
+///
 ///     // allocates pair of senders list and one receiver.
-///     let (mut senders, mut receiver) = allocator.allocate(0);
+///     let mut receiver = allocator.allocate(0, on_new_pusher);
+///
+///     let mut senders = senders2.borrow_mut();
 ///
 ///     // send typed data along each channel
 ///     use timely_communication::Message;
@@ -208,15 +221,27 @@ pub fn initialize<T:Send+'static, F: Fn(Generic)->T+Send+Sync+'static>(
 /// ```
 /// use timely_communication::Allocate;
 ///
+/// use std::rc::Rc;
+/// use core::cell::RefCell;
+///
 /// // configure for two threads, just one process.
-/// let builders = timely_communication::allocator::process::Process::new_vector(2, None);
+/// let builders = timely_communication::allocator::process::Process::new_vector(2);
 ///
 /// // initializes communication, spawns workers
 /// let guards = timely_communication::initialize_from(builders, Box::new(()), |mut allocator| {
 ///     println!("worker {} started", allocator.index());
 ///
+///     // allocate senders and receiver
+///     let senders1 = Rc::new(RefCell::new(Vec::new()));
+///     let senders2 = Rc::clone(&senders1);
+///
+///     let on_new_pusher = move |pusher| {
+///         senders1.borrow_mut().push(pusher);
+///     };
+///
 ///     // allocates pair of senders list and one receiver.
-///     let (mut senders, mut receiver) = allocator.allocate(0);
+///     let mut receiver = allocator.allocate(0, on_new_pusher);
+///     let mut senders = senders2.borrow_mut();
 ///
 ///     // send typed data along each channel
 ///     use timely_communication::Message;
