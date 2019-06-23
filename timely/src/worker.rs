@@ -7,7 +7,7 @@ use std::time::{Instant, Duration};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use crate::communication::{Allocate, Data, Push, Pull};
+use crate::communication::{Allocate, Data, Pull};
 use crate::communication::allocator::thread::{ThreadPusher, ThreadPuller};
 use crate::scheduling::{Schedule, Scheduler, Activations};
 use crate::progress::timestamp::{Refines};
