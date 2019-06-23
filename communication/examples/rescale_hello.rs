@@ -1,3 +1,21 @@
+///
+/// Usage:
+///
+/// 1) start a computation with e.g. two process, each with a single worker
+///
+///    `cargo run --package timely_communication --example rescale_hello -- -w1 -p0 -n2`
+///    `cargo run --package timely_communication --example rescale_hello -- -w1 -p1 -n2`
+///
+/// 2) after a bit, spawn the third process
+///    `cargo run --package timely_communication --example rescale_hello -- -w1 -p2 -n3`
+///
+/// 3) after a bit, spawn the fourth process
+///    `cargo run --package timely_communication --example rescale_hello -- -w1 -p3 -n4`
+///
+/// There are a few assumption we are relying on:
+///   * each worker with higher index setup connection to workers with lower indexes
+///   * addresses are chosen deterministically (one could provide host file and would work as well, though) // TODO(lorenzo) test
+///
 extern crate timely_communication;
 
 use std::ops::Deref;
