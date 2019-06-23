@@ -21,6 +21,7 @@ pub mod zero_copy;
 
 use crate::{Data, Push, Pull, Message};
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
+use crate::allocator::zero_copy::push_pull::Pusher;
 
 /// A proto-allocator, which implements `Send` and can be completed with `build`.
 ///
@@ -37,9 +38,9 @@ pub trait AllocateBuilder : Send {
 
 // TODO(lorenzo) doc
 
-/// A closure type to back-fill existing channels when a new worker process joins the cluster
-pub trait OnNewPusherFn<T>: Fn(Box<Push<Message<T>>>) + 'static {}
-impl<T,                  F: Fn(Box<Push<Message<T>>>) + 'static> OnNewPusherFn<T> for F {}
+/// Alias with Push trait
+pub trait OnNewPushFn<T>: Fn(Box<Push<Message<T>>>) + 'static {}
+impl<T,                F: Fn(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
 /// A type capable of allocating channels.
 ///
@@ -52,7 +53,7 @@ pub trait Allocate {
     fn peers(&self) -> usize;
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
-         where F: OnNewPusherFn<T>;
+         where F: OnNewPushFn<T>;
 
     /// If the allocator supports rescaling (atm only TcpAllocator does) and a worker
     /// joined the cluster, then back-fill all existing allocation with the new pusher

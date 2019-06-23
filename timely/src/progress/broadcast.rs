@@ -4,6 +4,8 @@ use crate::progress::{ChangeBatch, Timestamp};
 use crate::progress::Location;
 use crate::communication::{Message, Push, Pull};
 use crate::logging::TimelyLogger as Logger;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// A list of progress updates corresponding to `((child_scope, [in/out]_port, timestamp), delta)`
 pub type ProgressVec<T> = Vec<((Location, T), i64)>;
@@ -14,7 +16,7 @@ pub type ProgressMsg<T> = Message<(usize, usize, ProgressVec<T>)>;
 /// Manages broadcasting of progress updates to and receiving updates from workers.
 pub struct Progcaster<T:Timestamp> {
     to_push: Option<ProgressMsg<T>>,
-    pushers: Vec<Box<Push<ProgressMsg<T>>>>,
+    pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>,
     puller: Box<Pull<ProgressMsg<T>>>,
     /// Source worker index
     source: usize,
@@ -33,7 +35,16 @@ impl<T:Timestamp+Send> Progcaster<T> {
     pub fn new<A: crate::worker::AsWorker>(worker: &mut A, path: &Vec<usize>, mut logging: Option<Logger>) -> Progcaster<T> {
 
         let channel_identifier = worker.new_identifier();
-        let (pushers, puller) = worker.allocate(channel_identifier, &path[..]);
+
+        let pushers1 = Rc::new(RefCell::new(Vec::with_capacity(worker.peers())));
+        let pushers2 = Rc::clone(&pushers1);
+
+        let on_new_pusher = move |pusher| {
+            pushers1.borrow_mut().push(pusher);
+        };
+
+        let puller= worker.allocate(channel_identifier, &path[..], on_new_pusher);
+
         logging.as_mut().map(|l| l.log(crate::logging::CommChannelsEvent {
             identifier: channel_identifier,
             kind: crate::logging::CommChannelKind::Progress,
@@ -42,7 +53,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
         let addr = path.clone();
         Progcaster {
             to_push: None,
-            pushers,
+            pushers: pushers2,
             puller,
             source: worker_index,
             counter: 0,
@@ -69,7 +80,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 internal: Vec::new(),
             }));
 
-            for pusher in self.pushers.iter_mut() {
+            for pusher in self.pushers.borrow().iter_mut() {
 
                 // Attempt to re-use allocations, if possible.
                 if let Some(tuple) = &mut self.to_push {

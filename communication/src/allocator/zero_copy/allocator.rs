@@ -9,7 +9,7 @@ use bytes::arc::Bytes;
 use crate::networking::MessageHeader;
 
 use crate::{Allocate, Message, Data, Push, Pull};
-use crate::allocator::{AllocateBuilder, OnNewPusherFn};
+use crate::allocator::{AllocateBuilder, OnNewPushFn};
 use crate::allocator::Event;
 use crate::allocator::canary::Canary;
 
@@ -120,11 +120,9 @@ fn extract_future(future: Receiver<MergeQueue>) -> Rc<RefCell<SendEndpoint<Merge
     Rc::new(RefCell::new(sendpoint))
 }
 
-/// A trait with no generic type `T` so that on_new_pusher closures can be stored as Box<dyn OnNewPusher> in the same Vec
-//trait OnNewPusher {}
-//impl <T: 'static> OnNewPusherFn<T> for OnNewPusher {} // TODO static?
-
-trait SizedData : Data + Sized {}
+/// Alias with Pusher trait
+pub trait OnNewPusherFn<T>: Fn(Box<Pusher<Message<T>, MergeQueue>>) + 'static {}
+impl<T,                  F: Fn(Box<Pusher<Message<T>, MergeQueue>>) + 'static> OnNewPusherFn<T> for F {}
 
 /// A TCP-based allocator for inter-process communication.
 pub struct TcpAllocator<A: Allocate> {
@@ -147,14 +145,14 @@ pub struct TcpAllocator<A: Allocate> {
 
     // store channels allocated so far, so that we can back-fill them with
     // new pushers when a new worker process joins the cluster
-    channels: Vec<(usize, Box<dyn OnNewPusherFn<SizedData>>)>,
+    channels: Vec<(usize, Box<dyn OnNewPusherFn<()>>)>,
 }
 
 impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
-        where F: OnNewPusherFn<T>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_push: F) -> Box<Pull<Message<T>>>
+        where F: OnNewPushFn<T>
     {
         // Inner exchange allocations.
         let inner_peers = self.inner.peers();
@@ -164,14 +162,14 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         let inner_sends1 = Rc::new(RefCell::new(Vec::with_capacity(inner_peers)));
         let inner_sends2 = Rc::clone(&inner_sends1);
 
-        let on_new_pusher = move |pusher| {
-            inner_sends1.borrow_mut().push(pusher);
+        let on_new_inner_push = move |push| {
+            inner_sends1.borrow_mut().push(push);
         };
 
-        let inner_recv = self.inner.allocate(identifier, on_new_pusher);
+        let inner_recv = self.inner.allocate(identifier, on_new_inner_push);
 
         // now inner had been filled-up
-        let mut inner_sends = inner_sends1.borrow_mut();
+        let mut inner_sends = inner_sends2.borrow_mut();
 
         for target_index in 0 .. self.peers() {
 
@@ -179,7 +177,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             let mut process_id = target_index / inner_peers;
 
             if process_id == self.index / inner_peers {
-                on_new_pusher(inner_sends.remove(0));
+                on_new_push(inner_sends.remove(0));
             }
             else {
                 // message header template.
@@ -193,7 +191,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
                 // create, box, and stash new process_binary pusher.
                 if process_id > self.index / inner_peers { process_id -= 1; }
-                on_new_pusher(Box::new(Pusher::new(header, self.sends[process_id].clone())));
+                on_new_push(Box::new(Pusher::new(header, self.sends[process_id].clone())));
             }
         }
 
@@ -206,6 +204,19 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         use crate::allocator::counters::Puller as CountPuller;
         let canary = Canary::new(identifier, self.canaries.clone());
         let puller = Box::new(CountPuller::new(PullerInner::new(inner_recv, channel, canary), identifier, self.events().clone()));
+
+        // TODO(lorenzo) doc
+
+        let on_new_pusher_from = move |on_new_push: Box<dyn OnNewPushFn<T>>| {
+            move |pusher: Box<Pusher<Message<()>, MergeQueue>>| {
+                let pusher = pusher.into_typed::<T>();
+                on_new_push(Box::new(pusher))
+            }
+        };
+
+        let on_new_pusher = on_new_pusher_from(Box::new(on_new_push));
+
+        self.channels.push((identifier, Box::new(on_new_pusher)));
 
         puller
     }
@@ -227,15 +238,13 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                 // back-fill existing channels with `threads` new pushers pointing to the new send
                 for (channel_id, on_new_pusher) in self.channels.iter() {
 
-                    let on_new_pusher: &OnNewPusherFn<Data> = on_new_pusher.borrow();
-
                     // ASSUMPTION: if there are currently P processes, then
                     //             current processes have indexes [0..P-1]
                     //             and the new process has index P
                     //
                     // This will not be true when we allow an arbitrary worker to leave the cluster
 
-                    (0..threads).map(|thread_idx| {
+                    (0..threads).for_each(|thread_idx| {
                         let header = MessageHeader {
                             channel: *channel_id,
                             source: self.index,
@@ -264,7 +273,8 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             self.to_local
                 .remove(&dropped_channel)
                 .expect("non-existent channel dropped");
-            assert!(dropped.borrow().is_empty());
+            // TODO(lorenzo) why?
+            // assert!(dropped.borrow().is_empty());
         }
         ::std::mem::drop(canaries);
 

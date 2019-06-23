@@ -33,6 +33,12 @@ impl<T, P: BytesPush> Pusher<T, P> {
             phantom:    ::std::marker::PhantomData,
         }
     }
+
+    // TODO(lorenzo) doc
+    /// New Pusher with type T2
+    pub fn into_typed<T2>(self) -> Pusher<T2, P> {
+        Pusher::new(self.header, self.sender)
+    }
 }
 
 impl<T:Data, P: BytesPush> Push<Message<T>> for Pusher<T, P> {

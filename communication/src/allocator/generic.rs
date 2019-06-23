@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use crate::allocator::thread::ThreadBuilder;
 use crate::allocator::process::ProcessBuilder as TypedProcessBuilder;
-use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process, OnNewPusherFn};
+use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process, OnNewPushFn};
 use crate::allocator::zero_copy::allocator_process::{ProcessBuilder, ProcessAllocator};
 use crate::allocator::zero_copy::allocator::{TcpBuilder, TcpAllocator};
 
@@ -49,7 +49,7 @@ impl Generic {
     }
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
-        where F: OnNewPusherFn<T>
+        where F: OnNewPushFn<T>
     {
         match self {
             &mut Generic::Thread(ref mut t) => t.allocate(identifier, on_new_pusher),
@@ -90,7 +90,7 @@ impl Allocate for Generic {
     fn index(&self) -> usize { self.index() }
     fn peers(&self) -> usize { self.peers() }
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
-        where F: OnNewPusherFn<T>
+        where F: OnNewPushFn<T>
     {
         self.allocate(identifier, on_new_pusher)
     }

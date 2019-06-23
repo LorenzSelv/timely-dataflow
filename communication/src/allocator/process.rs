@@ -9,7 +9,7 @@ use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 
 use crate::allocator::thread::{ThreadBuilder};
-use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, OnNewPusherFn};
+use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, OnNewPushFn};
 use crate::{Push, Pull, Message};
 use crate::buzzer::Buzzer;
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
@@ -112,7 +112,7 @@ impl Allocate for Process {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
     fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
-        where F: OnNewPusherFn<T>
+        where F: OnNewPushFn<T>
     {
         // this is race-y global initialisation of all channels for all workers, performed by the
         // first worker that enters this critical section

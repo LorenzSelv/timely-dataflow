@@ -3,7 +3,7 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use crate::communication::{Data, Push, Pull};
+use crate::communication::{Data, Pull};
 use crate::communication::allocator::thread::{ThreadPusher, ThreadPuller};
 use crate::scheduling::Scheduler;
 use crate::scheduling::activate::Activations;
@@ -54,8 +54,10 @@ where
 {
     fn index(&self) -> usize { self.parent.index() }
     fn peers(&self) -> usize { self.parent.peers() }
-    fn allocate<D: Data>(&mut self, identifier: usize, address: &[usize]) -> (Vec<Box<Push<Message<D>>>>, Box<Pull<Message<D>>>) {
-        self.parent.allocate(identifier, address)
+    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
+        where F: OnNewPushFn<D>
+    {
+        self.parent.allocate(identifier, address, on_new_push)
     }
     fn pipeline<D: 'static>(&mut self, identifier: usize, address: &[usize]) -> (ThreadPusher<Message<D>>, ThreadPuller<Message<D>>) {
         self.parent.pipeline(identifier, address)
@@ -132,6 +134,7 @@ where
 }
 
 use crate::communication::Message;
+use timely_communication::allocator::OnNewPushFn;
 
 impl<'a, G, T> Clone for Child<'a, G, T>
 where

@@ -15,6 +15,7 @@ use crate::progress::SubgraphBuilder;
 use crate::progress::operate::Operate;
 use crate::dataflow::scopes::Child;
 use crate::logging::TimelyLogger;
+use timely_communication::allocator::OnNewPushFn;
 
 /// Methods provided by the root Worker.
 ///
@@ -35,7 +36,8 @@ pub trait AsWorker : Scheduler {
     /// scheduled in response to the receipt of records on the channel.
     /// Most commonly, this would be the address of the *target* of the
     /// channel.
-    fn allocate<T: Data>(&mut self, identifier: usize, address: &[usize]) -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>);
+    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
+        where F: OnNewPushFn<D>;
     /// Constructs a pipeline channel from the worker to itself.
     ///
     /// By default this method uses the native channel allocation mechanism, but the expectation is
@@ -73,13 +75,16 @@ pub struct Worker<A: Allocate> {
 impl<A: Allocate> AsWorker for Worker<A> {
     fn index(&self) -> usize { self.allocator.borrow().index() }
     fn peers(&self) -> usize { self.allocator.borrow().peers() }
-    fn allocate<D: Data>(&mut self, identifier: usize, address: &[usize]) -> (Vec<Box<Push<Message<D>>>>, Box<Pull<Message<D>>>) {
+    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
+        where F: OnNewPushFn<D>
+    {
         if address.len() == 0 { panic!("Unacceptable address: Length zero"); }
         let mut paths = self.paths.borrow_mut();
         paths.insert(identifier, address.to_vec());
         self.temp_channel_ids.borrow_mut().push(identifier);
-        self.allocator.borrow_mut().allocate(identifier)
+        self.allocator.borrow_mut().allocate(identifier, on_new_push)
     }
+
     fn pipeline<T: 'static>(&mut self, identifier: usize, address: &[usize]) -> (ThreadPusher<Message<T>>, ThreadPuller<Message<T>>) {
         if address.len() == 0 { panic!("Unacceptable address: Length zero"); }
         let mut paths = self.paths.borrow_mut();

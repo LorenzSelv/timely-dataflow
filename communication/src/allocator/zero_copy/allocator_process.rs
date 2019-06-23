@@ -10,7 +10,7 @@ use bytes::arc::Bytes;
 use crate::networking::MessageHeader;
 
 use crate::{Allocate, Message, Data, Push, Pull};
-use crate::allocator::{AllocateBuilder, Event, OnNewPusherFn};
+use crate::allocator::{AllocateBuilder, Event, OnNewPushFn};
 use crate::allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
@@ -120,7 +120,7 @@ impl Allocate for ProcessAllocator {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
-        where F: OnNewPusherFn<T>
+        where F: OnNewPushFn<T>
     {
         for target_index in 0 .. self.peers() {
 

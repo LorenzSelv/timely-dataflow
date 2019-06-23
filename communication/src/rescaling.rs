@@ -1,3 +1,4 @@
+//! TODO
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
@@ -7,6 +8,8 @@ use std::net::TcpListener;
 use crate::networking::recv_handshake;
 use crate::allocator::zero_copy::initialize::{LogSender, spawn_send_thread, spawn_recv_thread};
 
+// TODO(lorenzo) Doc
+///
 pub fn rescaler(my_index: usize,
                 my_address: String,
                 threads: usize,
