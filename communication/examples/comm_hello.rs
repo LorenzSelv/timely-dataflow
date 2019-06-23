@@ -2,6 +2,8 @@ extern crate timely_communication;
 
 use std::ops::Deref;
 use timely_communication::{Message, Allocate};
+use std::rc::Rc;
+use core::cell::RefCell;
 
 fn main() {
 
@@ -11,8 +13,20 @@ fn main() {
 
         println!("worker {} of {} started", allocator.index(), allocator.peers());
 
+        // If in cluster mode, channel allocations might have to be updated dynamically.
+        // See `rescaling_hello.rs` for a more detailed explanation for the need of the closure below.
+        // TODO(lorenzo) create rescaling_hello.rs
+        let senders1 = Rc::new(RefCell::new(Vec::new()));
+        let senders2 = Rc::clone(&senders1);
+
+        let on_new_pusher = move |pusher| {
+            senders1.borrow_mut().push(pusher);
+        };
+
         // allocates pair of senders list and one receiver.
-        let (mut senders, mut receiver) = allocator.allocate(0);
+        let mut receiver = allocator.allocate(0, on_new_pusher);
+
+        let mut senders = senders2.borrow_mut();
 
         // send typed data along each channel
         for i in 0 .. allocator.peers() {

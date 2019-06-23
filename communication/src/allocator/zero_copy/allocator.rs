@@ -15,7 +15,6 @@ use crate::allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
-use core::borrow::Borrow;
 
 /// Builds an instance of a TcpAllocator.
 ///
