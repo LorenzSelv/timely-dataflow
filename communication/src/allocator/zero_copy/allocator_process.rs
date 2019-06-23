@@ -119,7 +119,7 @@ pub struct ProcessAllocator {
 impl Allocate for ProcessAllocator {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         for target_index in 0 .. self.peers() {

@@ -121,8 +121,8 @@ fn extract_future(future: Receiver<MergeQueue>) -> Rc<RefCell<SendEndpoint<Merge
 }
 
 /// Alias with Pusher trait
-pub trait OnNewPusherFn<T>: Fn(Box<Pusher<Message<T>, MergeQueue>>) + 'static {}
-impl<T,                  F: Fn(Box<Pusher<Message<T>, MergeQueue>>) + 'static> OnNewPusherFn<T> for F {}
+pub trait OnNewPusherFn<T>: FnMut(Box<Pusher<Message<T>, MergeQueue>>) + 'static {}
+impl<T,                  F: FnMut(Box<Pusher<Message<T>, MergeQueue>>) + 'static> OnNewPusherFn<T> for F {}
 
 /// A TCP-based allocator for inter-process communication.
 pub struct TcpAllocator<A: Allocate> {
@@ -151,7 +151,7 @@ pub struct TcpAllocator<A: Allocate> {
 impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_push: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_push: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         // Inner exchange allocations.
@@ -207,7 +207,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
         // TODO(lorenzo) doc
 
-        let on_new_pusher_from = move |on_new_push: Box<dyn OnNewPushFn<T>>| {
+        let on_new_pusher_from = move |mut on_new_push: Box<dyn OnNewPushFn<T>>| {
             move |pusher: Box<Pusher<Message<()>, MergeQueue>>| {
                 let pusher = pusher.into_typed::<T>();
                 on_new_push(Box::new(pusher))
@@ -234,9 +234,11 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                 self.sends.push(new_send.clone());
 
                 let threads = self.inner.peers();
+                let self_index = self.index;
+                let self_peers = self.peers;
 
                 // back-fill existing channels with `threads` new pushers pointing to the new send
-                for (channel_id, on_new_pusher) in self.channels.iter() {
+                for (channel_id, on_new_pusher) in self.channels.iter_mut() {
 
                     // ASSUMPTION: if there are currently P processes, then
                     //             current processes have indexes [0..P-1]
@@ -247,8 +249,8 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                     (0..threads).for_each(|thread_idx| {
                         let header = MessageHeader {
                             channel: *channel_id,
-                            source: self.index,
-                            target: self.peers + thread_idx, // see assumption above
+                            source: self_index,
+                            target: self_peers + thread_idx, // see assumption above
                             length: 0,
                             seqno: 0,
                         };

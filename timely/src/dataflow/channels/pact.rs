@@ -67,11 +67,11 @@ impl<T: Eq+Data+Clone, D: Data+Clone, F: FnMut(&D)->u64+'static> Parallelization
         let pushers2 = Rc::clone(&pushers1);
 
         let source_idx = allocator.index();
-        let /*mut*/ target_idx = 0; // TODO(lorenzo) should it be `peers` instead?
+        let mut target_idx = 0; // TODO(lorenzo) should it be `peers` instead?
         let logging_clone = logging.clone();
         let on_new_pusher = move |pusher| {
             let pusher = LogPusher::new(pusher, source_idx, target_idx, identifier, logging_clone.clone());
-            //target_idx += 1;
+            target_idx += 1;
             pushers1.borrow_mut().push(pusher);
         };
 

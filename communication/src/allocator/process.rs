@@ -111,7 +111,7 @@ impl Process {
 impl Allocate for Process {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
-    fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         // this is race-y global initialisation of all channels for all workers, performed by the

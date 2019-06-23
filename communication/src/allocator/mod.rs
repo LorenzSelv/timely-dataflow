@@ -39,8 +39,8 @@ pub trait AllocateBuilder : Send {
 // TODO(lorenzo) doc
 
 /// Alias with Push trait
-pub trait OnNewPushFn<T>: Fn(Box<Push<Message<T>>>) + 'static {}
-impl<T,                F: Fn(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
+pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
+impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
 /// A type capable of allocating channels.
 ///
