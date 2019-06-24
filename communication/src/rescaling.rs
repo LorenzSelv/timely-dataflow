@@ -2,8 +2,6 @@
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
-use crate::logging::{CommunicationSetup, CommunicationEvent};
-use logging_core::Logger;
 use std::net::TcpListener;
 use crate::networking::recv_handshake;
 use crate::allocator::zero_copy::initialize::{LogSender, spawn_send_thread, spawn_recv_thread};

@@ -35,7 +35,6 @@ use std::net::TcpStream;
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::thread::JoinHandle;
-use std::io::Error;
 
 /// Returns a logger for communication events
 pub type LogSender = Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>;

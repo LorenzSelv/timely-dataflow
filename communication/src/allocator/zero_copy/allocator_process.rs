@@ -9,7 +9,7 @@ use bytes::arc::Bytes;
 
 use crate::networking::MessageHeader;
 
-use crate::{Allocate, Message, Data, Push, Pull};
+use crate::{Allocate, Message, Data, Pull};
 use crate::allocator::{AllocateBuilder, Event, OnNewPushFn};
 use crate::allocator::canary::Canary;
 

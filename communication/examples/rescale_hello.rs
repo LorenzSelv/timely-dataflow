@@ -83,8 +83,6 @@ fn main() {
                 allocator.release();
             }
         }
-
-        allocator.index()
     });
 
     // computation runs until guards are joined or dropped.

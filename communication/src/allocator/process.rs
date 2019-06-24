@@ -12,7 +12,6 @@ use crate::allocator::thread::{ThreadBuilder};
 use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, OnNewPushFn};
 use crate::{Push, Pull, Message};
 use crate::buzzer::Buzzer;
-use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 
 /// An allocator for inter-thread, intra-process communication
 pub struct ProcessBuilder {

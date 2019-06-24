@@ -13,7 +13,7 @@ use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process, OnNewP
 use crate::allocator::zero_copy::allocator_process::{ProcessBuilder, ProcessAllocator};
 use crate::allocator::zero_copy::allocator::{TcpBuilder, TcpAllocator};
 
-use crate::{Push, Pull, Data, Message};
+use crate::{Pull, Data, Message};
 
 /// Enumerates known implementors of `Allocate`.
 /// Passes trait method calls on to members.
