@@ -36,9 +36,15 @@ pub trait AllocateBuilder : Send {
     fn build(self) -> Self::Allocator;
 }
 
-// TODO(lorenzo) doc
-
-/// Alias with Push trait
+/// Alias trait for the `on_new_push` closure expected by the `allocate` function
+///
+/// The closure expects a (boxed) pusher to for messages of type `T`.
+/// The intended behavior is to add the pusher to a list of pushers wrapped
+/// in a Rc<RefCell<..>.
+/// This enables an allocator to store the closure and call it in the future
+/// to back-fill the channel allocation with new pushers.
+///
+/// The actual back-filling is performed on-demand when calling the `rescale` function.
 pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
 impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
@@ -55,8 +61,22 @@ pub trait Allocate {
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
          where F: OnNewPushFn<T>;
 
-    /// If the allocator supports rescaling (atm only TcpAllocator does) and a worker
-    /// joined the cluster, then back-fill all existing allocation with the new pushers
+    /// If a configuration change happens in the cluster, adapt existing channel to reflect that change.
+    ///
+    /// This function is implemented only by the `TcpAllocator` which allows the addition (and maybe removal?)
+    /// of workers. When a new worker process joins the computation, it would initiate connection to every other process
+    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/rescaling.rs).
+    ///
+    /// This function checks with the acceptor thread if a worker process joined, and if that is case it would
+    /// update allocator internal state and back-fill existing channels, by calling the `on_new_pusher`
+    /// closure that has been passed to the `allocate` function above.
+    ///
+    /// The number of peers (total number of worker threads in the computation) is also updated.
+    /// As a result, you should *not* rely on the number of peers to remain unchanged.
+    ///
+    /// The `ExchangePusher` relies on the modulo operator, and thus on a constant number of peers
+    /// to maintain correctness. This needs to be updated to use a routing table, or to require the usage
+    /// of Megaphone that keeps the routing table for us.
     fn rescale(&mut self) { /* nop by default */ }
 
     /// A shared queue of communication events with channel identifier.

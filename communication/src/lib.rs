@@ -157,18 +157,6 @@ impl<T, P: ?Sized + Push<T>> Push<T> for Box<P> {
     fn push(&mut self, element: &mut Option<T>) { (**self).push(element) }
 }
 
-// TODO(lorenzo) remove
-//pub trait IntoTyped<T1> {
-//    / consume self and produce a pusher with different element type
-//    fn into_typed<T2>(self) -> Box<dyn Push<T2>>;
-//}
-
-//impl<T, P: ?Sized + Push<T>, T2> IntoTyped<T,T2> for Box<P> {
-//    fn into_typed(self) -> Box<dyn Push<T2>> {
-//
-//    }
-//}
-
 
 /// Pulling elements of type `T`.
 pub trait Pull<T> {

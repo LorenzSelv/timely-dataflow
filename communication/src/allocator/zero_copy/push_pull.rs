@@ -34,8 +34,13 @@ impl<T, P: BytesPush> Pusher<T, P> {
         }
     }
 
-    // TODO(lorenzo) doc
-    /// New Pusher with type T2
+    /// Consume the Pusher and create a copy of it for a new element type `T2`
+    ///
+    /// Effectively a cast operation, used in the `on_new_pusher` closure to
+    /// transform an "untyped" pusher (actual type is `()`) to a typed pusher
+    /// required by the allocation. This is needed as different allocation have
+    /// different message types, but we need to store `on_new_pusher` closures
+    /// of the same type (cannot use variant trait objects).
     pub fn into_typed<T2>(self) -> Pusher<T2, P> {
         Pusher::new(self.header, self.sender)
     }

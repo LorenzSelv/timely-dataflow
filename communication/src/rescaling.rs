@@ -1,4 +1,4 @@
-//! TODO
+//! Rescaling of the computation, allowing new worker processes to setup connections to existing ones
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
@@ -8,8 +8,17 @@ use std::net::TcpListener;
 use crate::networking::recv_handshake;
 use crate::allocator::zero_copy::initialize::{LogSender, spawn_send_thread, spawn_recv_thread};
 
-// TODO(lorenzo) Doc
+/// code to be executed in the acceptor (or rescaler) thread.
 ///
+/// The thread would bind to the same address assigned to the worker thread, and listen
+/// for incoming TCP connections.
+/// When a new connection is established, a pair of send/recv network thread is spawned.
+/// A vector of mpsc::channel is allocated, one for each worker thread internal to this process, and sent
+/// to them using the `rescaler_tx` sender handle.
+/// A worker using the TcpAllocator (cluster mode), will do an non-blocking read from this channel in the `rescale` function.
+///
+/// The payload of the message is a pair (promise, future) used to setup shared MergeQueue with the new network threads,
+/// as done in the `initialize_networking` function at communication/src/allocator/zero_copy/initialize.rs
 pub fn rescaler(my_index: usize,
                 my_address: String,
                 threads: usize,

@@ -29,7 +29,7 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     futures:   Vec<Receiver<MergeQueue>>,  // to receive queues to each network thread.
     promises:   Vec<Sender<MergeQueue>>,    // to send queues from each network thread.
 
-    // TODO(lorenzo) doc
+    // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
 }
 
@@ -106,6 +106,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
     }
 }
 
+// Allocate and send MergeQueue shared with the recv network thread
 fn fulfill_promise(promise: Sender<MergeQueue>) -> MergeQueue {
     let buzzer = crate::buzzer::Buzzer::new();
     let queue = MergeQueue::new(buzzer);
@@ -113,13 +114,19 @@ fn fulfill_promise(promise: Sender<MergeQueue>) -> MergeQueue {
     queue
 }
 
+// Receive MergeQueue shared with the send network thread
 fn extract_future(future: Receiver<MergeQueue>) -> Rc<RefCell<SendEndpoint<MergeQueue>>> {
     let queue = future.recv().expect("Failed to receive push queue");
     let sendpoint = SendEndpoint::new(queue);
     Rc::new(RefCell::new(sendpoint))
 }
 
-/// Alias with Pusher trait
+/// Alias trait for `on_new_pusher` function specialized to the Pusher concrete object.
+///
+/// Using the OnNewPushFn<T> is not possible as it would require to use a Vec of trait objects,
+/// but this is not possible as we need to perform certain operation
+/// (casting the allocated pusher to the appropriate type needs a generic trait method and it's not allowed
+/// in trait objects, see https://doc.rust-lang.org/error-index.html#E0038)
 pub trait OnNewPusherFn<T>: FnMut(Box<Pusher<Message<T>, MergeQueue>>) + 'static {}
 impl<T,                  F: FnMut(Box<Pusher<Message<T>, MergeQueue>>) + 'static> OnNewPusherFn<T> for F {}
 
@@ -139,11 +146,11 @@ pub struct TcpAllocator<A: Allocate> {
     recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
 
-    // TODO(lorenzo) doc
+    // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
 
     // store channels allocated so far, so that we can back-fill them with
-    // new pushers when a new worker process joins the cluster
+    // new pushers by calling the associated closur when a new worker process joins the cluster
     channels: Vec<(usize, Box<dyn OnNewPusherFn<()>>)>,
 }
 
@@ -204,8 +211,17 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         let canary = Canary::new(identifier, self.canaries.clone());
         let puller = Box::new(CountPuller::new(PullerInner::new(inner_recv, channel, canary), identifier, self.events().clone()));
 
-        // TODO(lorenzo) doc
 
+        // This a tricky bit. The `channels` Vec must store closures of the same type (i.e. Pusher cannot be variant in `T`).
+        // But the allocator must support allocation of channels of different types (and be able to back-fill them).
+        // To circumvent the limitation above, the `rescale` function will allocate a `Pusher` for the empty type `()` (arbitrary)
+        // and then call the `on_new_pusher` closure we are crafting below.
+        //
+        // The `on_new_pusher` closure takes a boxed pusher for type `()` and cast it to the type `T` requested
+        // by the allocation. Once we have a pusher of the correct type, we call the `on_new_push` closure
+        // that will insert the new pusher in the pushers list.
+        //
+        // The higher-order function below takes the `on_new_push` closure and crafts the `on_new_pusher` closure.
         let on_new_pusher_from = move |mut on_new_push: Box<dyn OnNewPushFn<T>>| {
             move |pusher: Box<Pusher<Message<()>, MergeQueue>>| {
                 let pusher = pusher.into_typed::<T>();
@@ -215,15 +231,28 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
         let on_new_pusher = on_new_pusher_from(Box::new(on_new_push));
 
+        // store the on_new_pusher closure so we can call it to back-fill the channel we just allocated
         self.channels.push((identifier, Box::new(on_new_pusher)));
 
         puller
     }
 
-    // TODO(lorenzo) doc
+    /// When a new worker process joins the computation, it would initiate connection to every other process
+    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/rescaling.rs).
+    ///
+    /// This function checks with the acceptor (or rescaler) thread if a worker process joined, and if that is case it would
+    /// update allocator internal state and back-fill existing channels, by calling the `on_new_pusher`
+    /// closure that has been passed to the `allocate` function above.
+    ///
+    /// The number of peers (total number of worker threads in the computation) is also updated.
+    /// As a result, you should *not* rely on the number of peers to remain unchanged.
     fn rescale(&mut self) {
+        // try receiving from the rescale thread - did any new worker process initiated a connection?
         if let Some(rescaler_rx) = &self.rescaler_rx {
 
+            // a new process joined. The rescaler thread spawned a new pair of network thread
+            // for sending/receiving from this new worker process. We need to setup shared `MergeQueue`
+            // with those threads. The protocol is the same as the initialization code.
             if let Ok((promise, future)) = rescaler_rx.try_recv() {
 
                 // update recvs and sends
@@ -245,6 +274,9 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                     //
                     // This will not be true when we allow an arbitrary worker to leave the cluster
 
+                    // for each worker thread in the remote process (assumption: it has the same number of threads)
+                    // allocate a pusher with appropriate message header and call the `on_new_pusher` closure
+                    // to back-fill the channel
                     (0..threads).for_each(|thread_idx| {
                         let header = MessageHeader {
                             channel: *channel_id,
@@ -274,8 +306,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             self.to_local
                 .remove(&dropped_channel)
                 .expect("non-existent channel dropped");
-            // TODO(lorenzo) why?
-            // assert!(dropped.borrow().is_empty());
+            assert!(dropped.borrow().is_empty());
         }
         ::std::mem::drop(canaries);
 

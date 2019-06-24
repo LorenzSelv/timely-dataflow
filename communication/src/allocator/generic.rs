@@ -58,7 +58,9 @@ impl Generic {
             &mut Generic::ZeroCopy(ref mut z) => z.allocate(identifier, on_new_pusher),
         }
     }
-    /// TODO(lorenzo)
+
+    /// Rescale the allocator if a changed occurred in the cluster
+    /// Only ZeroCopy (`TcpAllocator`) actually does something, for the others it's a nop.
     fn rescale(&mut self) {
         match self {
             &mut Generic::Thread(ref mut t) => t.rescale(),

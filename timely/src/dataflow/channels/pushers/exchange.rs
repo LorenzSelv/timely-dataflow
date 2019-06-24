@@ -19,7 +19,8 @@ impl<T: Clone, D, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64>  Exchange<T, D, 
     /// Allocates a new `Exchange` from a supplied set of pushers and a distribution function.
     pub fn new(pushers: Rc<RefCell<Vec<P>>>, key: H) -> Exchange<T, D, P, H> {
         let mut buffers = vec![];
-        // TODO(lorenzo) init buffers, might have to change later
+        // allocate buffers, one for each pusher. If new pushers are added,
+        // we will extend the vector with more buffers in the `push` function
         for _ in 0..pushers.borrow().len() {
             buffers.push(Vec::with_capacity(Message::<T, D>::default_length()));
         }

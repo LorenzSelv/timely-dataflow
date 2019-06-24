@@ -14,7 +14,15 @@
 ///
 /// There are a few assumption we are relying on:
 ///   * each worker with higher index setup connection to workers with lower indexes
-///   * addresses are chosen deterministically (one could provide host file and would work as well, though) // TODO(lorenzo) test
+///   * addresses are chosen deterministically (one could provide host file and would work as well, though)
+///     e.g for the example above the host file could look like this:
+///     ```ignore
+///     127.0.0.1:5000
+///     127.0.0.1:5001
+///     127.0.0.1:5002
+///     127.0.0.1:5003
+///     ```
+///     Each worker would consider only the first `n` hosts in the file, where `n` is passed as an option.
 ///
 extern crate timely_communication;
 
