@@ -64,7 +64,12 @@ pub fn recv_loop(
             },
         };
 
+        // TODO(lorenzo) this guy is the one that notices the failure.. Ok(0) = channel closed
+        //               should set a `shutdown` flag to signal the puller about the failure, => the puller will stop pull from this MergeQueue
+        //               should inform the sender that the channel is broken
+
         assert!(read > 0);
+
         buffer.make_valid(read);
 
         // Consume complete messages from the front of self.buffer.

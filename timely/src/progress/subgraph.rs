@@ -351,7 +351,7 @@ where
         }
 
         // Extract progress statements into either pre- or post-exchange buffers.
-        if child.local {
+        if child.local { // TODO(lorenzo) undestand this
             child.extract_progress(&mut self.local_pointstamp, &mut self.temp_active);
         }
         else {

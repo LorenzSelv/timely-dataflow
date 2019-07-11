@@ -23,6 +23,8 @@ fn main() {
             .map(|r| EventReader::<Duration,(Duration,TimelySetup,TimelyEvent),_>::new(r))
             .collect::<Vec<_>>();
 
+        println!("connesso");
+
         worker.dataflow(|scope| {
             replayers
                 .replay_into(scope)

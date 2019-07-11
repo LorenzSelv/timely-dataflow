@@ -58,6 +58,7 @@ impl<T:Data, P: BytesPush> Push<Message<T>> for Pusher<T, P> {
             assert!(header.length > 0);
 
             // acquire byte buffer and write header, element.
+            // TODO(lorenzo) sender might be invalid when remove worker
             let mut borrow = self.sender.borrow_mut();
             {
                 let mut bytes = borrow.reserve(header.required_bytes());

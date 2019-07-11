@@ -25,7 +25,7 @@ use crate::dataflow::operators::generic::operator_info::OperatorInfo;
 pub struct OperatorShape {
     name: String,   // A meaningful name for the operator.
     notify: bool,   // Does the operator require progress notifications.
-    peers: usize,   // The total number of workers in the computation.
+    peers: usize,   // The total number of workers in the computation. // TODO(lorenzo) THIS SHOULD BE UPDATED !! or maybe not, used only at initialization in `get_internal_summaries`
     inputs: usize,  // The number of input ports.
     outputs: usize, // The number of output ports.
 }
@@ -241,6 +241,7 @@ where
             .internals
             .iter_mut()
             .for_each(|output| output.update(Default::default(), self.shape.peers as i64));
+            // TODO(lorenzo) important
 
         (self.summary.clone(), self.shared_progress.clone())
     }

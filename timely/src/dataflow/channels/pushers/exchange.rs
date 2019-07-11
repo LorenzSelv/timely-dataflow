@@ -35,6 +35,7 @@ impl<T: Clone, D, P: Push<Bundle<T, D>>, H: FnMut(&T, &D)->u64>  Exchange<T, D, 
     fn flush(&mut self, index: usize) {
         if !self.buffers[index].is_empty() {
             if let Some(ref time) = self.current {
+                // TODO(lorenzo) this call might fail if the pusher is broken
                 Message::push_at(&mut self.buffers[index], time.clone(), &mut self.pushers.borrow_mut()[index]);
             }
         }

@@ -52,7 +52,13 @@ impl MergeQueue {
 impl BytesPush for MergeQueue {
     fn extend<I: IntoIterator<Item=Bytes>>(&mut self, iterator: I) {
 
+        // TODO(lorenzo) trying to push into the merge queue
+        //    failure case: sender try to push to closed tcpStream
+        //
+        //    this is used on a pusher.. not on the sender => the sender should be removed as well, not only the pusher
+        //    for the receiving side, it's easier: we are working on the recv directly
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
+        // if self.shutdown.load(Ordering::SeqCst) { Return error, so that we remove the send channel from the Vec (HashMap) and the pusher }
 
         // try to acquire lock without going to sleep (Rust's lock() might yield)
         let mut lock_ok = self.queue.try_lock();
@@ -94,6 +100,8 @@ impl BytesPush for MergeQueue {
 impl BytesPull for MergeQueue {
     fn drain_into(&mut self, vec: &mut Vec<Bytes>) {
         if self.panic.load(Ordering::SeqCst) { panic!("MergeQueue poisoned."); }
+        // TODO(lorenzo) trying to receive from the MergeQueue
+        // if self.shutdown.load(Ordering::SeqCst) { Return error, so that we remove the recv channel from the Vec (HashMap) }
 
         // try to acquire lock without going to sleep (Rust's lock() might yield)
         let mut lock_ok = self.queue.try_lock();
@@ -127,7 +135,7 @@ impl Drop for MergeQueue {
 
 /// A `BytesPush` wrapper which stages writes.
 pub struct SendEndpoint<P: BytesPush> {
-    send: P,
+    send: P, // TODO(lorenzo) this is a MergeQueue
     buffer: BytesSlab,
 }
 
@@ -138,6 +146,15 @@ impl<P: BytesPush> SendEndpoint<P> {
         let valid_len = self.buffer.valid().len();
         if valid_len > 0 {
             self.send.extend(Some(self.buffer.extract(valid_len)));
+            // TODO(lorenzo) this call might fail if send_thread signaled channel closed
+            //        however, if we are *not* sending progress update, but data, it means
+            //        we did not reroute tuple properly (assuming happy path when we know a worker should be removed)
+            //        so this is an error!
+            //
+            // Problem: when/how do we remove a pusher? if never write to it?
+            //          who owns the pusher? the ExchangePusher..
+            //             - so it should check and remove broken pushers
+            //             - all leave them there and every once in a while check for validity and remove them them
         }
     }
 

@@ -134,7 +134,7 @@ where
 }
 
 use crate::communication::Message;
-use timely_communication::allocator::OnNewPushFn;
+use timely_communication::allocator::OnNewPushFn; // TODO(lorenzo) move me up
 
 impl<'a, G, T> Clone for Child<'a, G, T>
 where
