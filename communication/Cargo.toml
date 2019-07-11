@@ -24,3 +24,4 @@ abomonation = "0.7"
 abomonation_derive = "0.4"
 timely_bytes = { path = "../bytes", version = "0.9" }
 timely_logging = { path = "../logging", version = "0.9" }
+pubsub = { path = "/home/lorenzo/pubsub", version = "0.1" }

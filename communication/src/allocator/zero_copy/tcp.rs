@@ -12,6 +12,8 @@ use super::bytes_exchange::MergeQueue;
 use logging_core::Logger;
 
 use crate::logging::{CommunicationEvent, CommunicationSetup, MessageEvent, StateEvent};
+use pubsub::queue::ring_log_queue::{RingLogCursor, RingLogQueue, RingLogFolder};
+use pubsub::queue::log_queue::LogQueue;
 
 /// Repeatedly reads from a TcpStream and carves out messages.
 ///
@@ -194,4 +196,81 @@ pub fn send_loop(
 
     // Log the receive thread's start.
     logger.as_mut().map(|l| l.log(StateEvent { send: true, process, remote, start: false, }));
+}
+
+/// TODO(lorenzo) doc
+pub fn pt_recv_loop(
+    mut reader: TcpStream,
+    pt_cursor_promises: Vec<Sender<RingLogCursor<()>>>,
+    process: usize,
+    remote: usize,
+    mut logger: Option<Logger<CommunicationEvent, CommunicationSetup>>)
+{
+    // Log the receive thread's start.
+    logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: true }));
+
+    // Allocate a LogQueue that discard progress updates that have been read by all workers (`no_fold()`)
+    let capacity = 1 << 20;
+    let mut log_queue = RingLogQueue::new(capacity, RingLogFolder::no_fold());
+
+    // Send cursors to all worker threads, so they can read progress updated from the queue
+
+    pt_cursor_promises.into_iter().for_each(|tx| tx.send(log_queue.new_cursor()).expect("Failed to send cursor"));
+
+    // Buffer to read data from the tcp stream
+    let mut buffer = [0_u8; 1<<20];
+
+    let mut active = true;
+    while active {
+
+        let read = match reader.read(&mut buffer) {
+            Ok(n) => n,
+            Err(x) => {
+                // We don't expect this, as socket closure results in Ok(0) reads.
+                println!("Error: {:?}", x);
+                0
+            },
+        };
+
+        // TODO(lorenzo) this guy is the one that notices the failure.. Ok(0) = channel closed
+        //               should set a `shutdown` flag to signal the puller about the failure, => the puller will stop pull from this MergeQueue
+        //               should inform the sender that the channel is broken
+        assert!(read > 0);
+
+        let mut consumed = 0;
+
+        // Consume complete messages from the front of self.buffer.
+        while let Some(header) = MessageHeader::try_read(&mut buffer[consumed..read]) {
+
+            let message_size = header.required_bytes();
+
+            // Record message receipt.
+            logger.as_mut().map(|logger| {
+                logger.log(MessageEvent { is_send: false, header, });
+            });
+
+            if header.length > 0 {
+                // try to append until it succeeds. It will only fail if the buffer is full
+                while !log_queue.append_raw(&buffer[consumed..message_size]) {}
+
+                consumed += message_size;
+            }
+            else {
+                // Shutting down; confirm absence of subsequent data.
+                active = false;
+                // if !buffer.valid().is_empty() {
+                if consumed + message_size != read {
+                    panic!("Clean shutdown followed by data.");
+                }
+                if reader.read(&mut buffer).expect("read failure") > 0 {
+                    panic!("Clean shutdown followed by data.");
+                }
+            }
+        }
+
+        assert_eq!(consumed, read, "consumed bytes differs from the read bytes");
+    }
+
+    // Log the receive thread's start.
+    logger.as_mut().map(|l| l.log(StateEvent { send: false, process, remote, start: false, }));
 }

@@ -16,6 +16,8 @@ use crate::allocator::canary::Canary;
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
 
+use pubsub::queue::ring_log_queue::RingLogCursor;
+
 /// Builds an instance of a TcpAllocator.
 ///
 /// Builders are required because some of the state in a `TcpAllocator` cannot be sent between
@@ -28,6 +30,11 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     peers:  usize,                      // number of peer allocators.
     futures:   Vec<Receiver<MergeQueue>>,  // to receive queues to each network thread.
     promises:   Vec<Sender<MergeQueue>>,    // to send queues from each network thread.
+
+    pt_cursor_future:  Receiver<RingLogCursor<()>>, // receive a cursor to read the progress updates queue.
+                                                    // Empty type () because we use the raw interface
+    pt_queue_future: Receiver<MergeQueue>,          // as the other promises above, we share a MergeQueue to
+                                                    // send progress updates to the progress tracking thread
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
@@ -53,7 +60,9 @@ pub fn new_vector<A: AllocateBuilder>(
     rescaler_rxs: Vec<Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>>)
 -> (Vec<TcpBuilder<A>>,
     Vec<Vec<Sender<MergeQueue>>>,
-    Vec<Vec<Receiver<MergeQueue>>>)
+    Vec<Vec<Receiver<MergeQueue>>>,
+    Vec<Sender<MergeQueue>>,
+    Vec<Sender<RingLogCursor<()>>>)
 {
     let threads = allocators.len();
 
@@ -61,14 +70,23 @@ pub fn new_vector<A: AllocateBuilder>(
     let (network_promises, worker_futures) = crate::promise_futures(processes-1, threads);
     let (worker_promises, network_futures) = crate::promise_futures(threads, processes-1);
 
+    let (mut pt_queue_promises, pt_queue_futures) = crate::promise_futures(1, threads);
+    let (pt_cursor_promises, mut pt_cursor_futures) = crate::promise_futures(threads, 1);
+
+    // futures go to the worker thread
+    let pt_queue_futures  = pt_queue_futures.into_iter().flatten();
+    let pt_cursor_futures  = pt_cursor_futures.pop().unwrap();
+
     let builders =
     allocators
         .into_iter()
         .zip(worker_promises)
         .zip(worker_futures)
         .zip(rescaler_rxs)
+        .zip(pt_queue_futures)
+        .zip(pt_cursor_futures)
         .enumerate()
-        .map(|(index, (((inner, promises), futures), rescaler_rx))| {
+        .map(|(index, (((((inner, promises), futures), rescaler_rx), pt_queue_future), pt_cursor_future))| {
             TcpBuilder {
                 inner,
                 index: my_process * threads + index,
@@ -76,10 +94,16 @@ pub fn new_vector<A: AllocateBuilder>(
                 promises,
                 futures,
                 rescaler_rx,
+                pt_queue_future,
+                pt_cursor_future,
             }})
         .collect();
 
-    (builders, network_promises, network_futures)
+    // promises go to the progress tracking thread
+    let pt_queue_promises = pt_queue_promises.pop().unwrap();
+    let pt_cursor_promises = pt_cursor_promises.into_iter().flatten().collect();
+
+    (builders, network_promises, network_futures, pt_queue_promises, pt_cursor_promises)
 }
 
 impl<A: AllocateBuilder> TcpBuilder<A> {
@@ -91,6 +115,9 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
 
         let sends = self.futures.into_iter().map(extract_future).collect();
 
+        let pt_cursor = self.pt_cursor_future.recv().expect("failed to receive cursor");
+        let pt_queue  = self.pt_queue_future.recv().expect("failed to receive MergeQueue");
+
         TcpAllocator {
             inner: self.inner.build(),
             index: self.index,
@@ -101,6 +128,8 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             recvs,
             to_local: HashMap::new(),
             rescaler_rx: self.rescaler_rx,
+            pt_cursor,
+            pt_queue,
             channels: Vec::new(),
         }
     }
@@ -148,6 +177,11 @@ pub struct TcpAllocator<A: Allocate> {
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
+
+    pt_cursor:  RingLogCursor<()>, // cursor to read the progress updates queue.
+                                   // Empty type () because we use the raw interface
+    
+    pt_queue: MergeQueue,          // MergeQueue to send progress updates to the progress tracking thread
 
     // store channels allocated so far, so that we can back-fill them with
     // new pushers by calling the associated closur when a new worker process joins the cluster

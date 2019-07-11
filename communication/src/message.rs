@@ -49,6 +49,12 @@ pub struct Message<T> {
 
 /// Possible returned representations from a channel.
 enum MessageContents<T> {
+    // TODO(lorenzo) as a first iteration we can use Binary(..) (but without bytes)
+    //               which would require 1 copy inside the `pull` implementation.
+    //               Later, we could make a new type here `CursorView` that has a closure
+    //               which would view the type in the buffer
+    //               Then we have a method `if_view` that ...
+
     /// Binary representation. Only available as a reference.
     Binary(abomonation::abomonated::Abomonated<T, Bytes>),
     /// Rust typed instance. Available for ownership.
@@ -110,6 +116,9 @@ impl<T: Data> Message<T> {
         let abomonated = abomonation::abomonated::Abomonated::new(bytes).expect("Abomonated::new() failed.");
         Message { payload: MessageContents::Binary(abomonated) }
     }
+
+    // TODO(lorenzo) from_slice(slice: &[u8])
+    //       so we can call it from within the `pull` implementation of `CursorPuller`
 
     /// The number of bytes required to serialize the data.
     pub fn length_in_bytes(&self) -> usize {

@@ -42,7 +42,6 @@ pub fn rescaler(my_index: usize,
         spawn_send_thread(my_index, new_worker_index, stream.try_clone().unwrap(), log_sender.clone(), network_promise).expect("Spawn send thread");
         spawn_recv_thread(my_index, new_worker_index, stream.try_clone().unwrap(), log_sender.clone(), network_future, threads).expect("Spawn recv thread");
 
-
         // Send promises and futures to the workers, so that they can establish MergeQueues with the send/recv network threads
         rescaler_txs
             .iter()
