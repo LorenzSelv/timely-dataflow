@@ -124,6 +124,8 @@ impl<T, P: Pull<T>>  Puller<T, P> {
 }
 impl<T, P: Pull<T>> Pull<T> for Puller<T, P> {
     #[inline]
+    // TODO(lorenzo) why it does not push the Event::Pulled right away? pull is called in a loop until it's none
+    //               => push a single event with the count of all pulled events in this loop
     fn pull(&mut self) -> &mut Option<T> {
         let result = self.puller.pull();
         if result.is_none() {

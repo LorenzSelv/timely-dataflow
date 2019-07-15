@@ -4,6 +4,9 @@ use std::sync::Arc;
 use bytes::arc::Bytes;
 use abomonation;
 use crate::Data;
+use pubsub::queue::demux_cursor::RawOneViewCursor;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// Either an immutable or mutable reference.
 pub enum RefOrMut<'a, T> where T: 'a {
@@ -49,11 +52,9 @@ pub struct Message<T> {
 
 /// Possible returned representations from a channel.
 enum MessageContents<T> {
-    // TODO(lorenzo) as a first iteration we can use Binary(..) (but without bytes)
-    //               which would require 1 copy inside the `pull` implementation.
-    //               Later, we could make a new type here `CursorView` that has a closure
-    //               which would view the type in the buffer
-    //               Then we have a method `if_view` that ...
+    // TODO(lorenzo) we are now doing one copy to get the message
+    //    from the cursor and put it in a Owned.
+    //    If interface for the Cursor would not take a closure this could be avoided.
 
     /// Binary representation. Only available as a reference.
     Binary(abomonation::abomonated::Abomonated<T, Bytes>),
@@ -117,9 +118,6 @@ impl<T: Data> Message<T> {
         Message { payload: MessageContents::Binary(abomonated) }
     }
 
-    // TODO(lorenzo) from_slice(slice: &[u8])
-    //       so we can call it from within the `pull` implementation of `CursorPuller`
-
     /// The number of bytes required to serialize the data.
     pub fn length_in_bytes(&self) -> usize {
         match &self.payload {
@@ -142,6 +140,18 @@ impl<T: Data> Message<T> {
                 unsafe { abomonation::encode(&**typed, writer).expect("Message::into_bytes(): Abomonation::encode failed"); }
             },
         }
+    }
+}
+
+#[cfg(not(feature = "bincode"))]
+impl<T: Data + Clone> Message<T> {
+    /// TODO(lorenzo)
+    pub fn from_cursor(cursor: RawOneViewCursor) -> Self {
+        let message1 = Rc::new(RefCell::new(None));
+        let message2 = Rc::clone(&message1);
+        cursor.view_as(|raw_message: &T| *message1.borrow_mut() = Some(raw_message.clone()));
+        let message = Rc::try_unwrap(message2).ok().unwrap().into_inner().unwrap().to_owned();
+        Message { payload: MessageContents::Owned(message) }
     }
 }
 

@@ -58,6 +58,34 @@ pub trait Allocate {
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
          where F: OnNewPushFn<T>;
 
+    /// Constructs several send endpoints and one receive endpoint for sharing progress tracker updates.
+    ///
+    /// TODO: explain
+    /// TODO: clone is needed for the last step in which we convert the one_view_cursor -> T
+    ///       might not be needed if cursor is no longer closure-based
+    fn progress_tracking_channel<T: Data + Clone>(&mut self, identifier: usize)
+        -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
+
+        // defaults to use the `allocate` method above, only `TcpAllocator` will implement
+        // a different behavior.
+
+        let senders1 = Rc::new(RefCell::new(Vec::new()));
+        let senders2 = Rc::clone(&senders1);
+
+        let on_new_pusher = move |pusher| {
+            senders1.borrow_mut().push(pusher);
+        };
+
+        // allocates pair of senders list and one receiver.
+        let receiver = self.allocate(identifier, on_new_pusher);
+
+        let senders = Rc::try_unwrap(senders2).ok()
+            .expect("you should re-implement this method")
+            .into_inner();
+
+        (senders, receiver)
+    }
+
     /// If a configuration change happens in the cluster, adapt existing channel to reflect that change.
     ///
     /// This function is implemented only by the `TcpAllocator` which allows the addition (and maybe removal?)

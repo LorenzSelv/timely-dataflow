@@ -8,7 +8,7 @@ use bytes::arc::Bytes;
 
 use crate::networking::MessageHeader;
 
-use crate::{Allocate, Message, Data, Pull};
+use crate::{Allocate, Message, Data, Pull, Push};
 use crate::allocator::{AllocateBuilder, OnNewPushFn};
 use crate::allocator::Event;
 use crate::allocator::canary::Canary;
@@ -16,7 +16,9 @@ use crate::allocator::canary::Canary;
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
 
-use pubsub::queue::ring_log_queue::RingLogCursor;
+use pubsub::queue::ring_log_queue::{RingLogCursor, RawRingLogCursor};
+use pubsub::queue::demux_cursor::{RawDemuxLogCursor, DemuxFn, OneViewCursor, RawOneViewCursor};
+use crate::allocator::zero_copy::push_pull::CursorPullerInner;
 
 /// Builds an instance of a TcpAllocator.
 ///
@@ -115,8 +117,14 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
 
         let sends = self.futures.into_iter().map(extract_future).collect();
 
+        // receive the cursor to the log queue from the process tracker recv thread
         let pt_cursor = self.pt_cursor_future.recv().expect("failed to receive cursor");
-        let pt_queue  = self.pt_queue_future.recv().expect("failed to receive MergeQueue");
+
+        let pt_cursor = RawDemuxLogCursor::new(pt_cursor, DemuxFn::raw(|raw_message| {
+            MessageHeader::try_read(raw_message).map(|header| header.channel)
+        }));
+
+        let pt_queue  = extract_future(self.pt_queue_future);
 
         TcpAllocator {
             inner: self.inner.build(),
@@ -127,9 +135,10 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             sends,
             recvs,
             to_local: HashMap::new(),
+            pt_to_local: HashMap::new(),
             rescaler_rx: self.rescaler_rx,
             pt_cursor,
-            pt_queue,
+            pt_send: pt_queue,
             channels: Vec::new(),
         }
     }
@@ -175,13 +184,15 @@ pub struct TcpAllocator<A: Allocate> {
     recvs:      Vec<MergeQueue>,                                // recvs[x] <- from process x.
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
 
+    pt_to_local:   HashMap<usize, Rc<RefCell<VecDeque<RawOneViewCursor>>>>,  // to worker-local progress tracker pullers.
+
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Option<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>,
 
-    pt_cursor:  RingLogCursor<()>, // cursor to read the progress updates queue.
-                                   // Empty type () because we use the raw interface
-    
-    pt_queue: MergeQueue,          // MergeQueue to send progress updates to the progress tracking thread
+    pt_cursor:  RawDemuxLogCursor, // cursor to read the progress updates queue.
+                                    // Empty type () because we use the raw interface
+
+    pt_send: Rc<RefCell<SendEndpoint<MergeQueue>>>, // -> goes to progress tracker process
 
     // store channels allocated so far, so that we can back-fill them with
     // new pushers by calling the associated closur when a new worker process joins the cluster
@@ -209,7 +220,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         let inner_recv = self.inner.allocate(identifier, on_new_inner_push);
 
         // now inner had been filled-up
-        let mut inner_sends = inner_sends2.borrow_mut();
+        let mut inner_sends = Rc::try_unwrap(inner_sends2).ok().unwrap().into_inner();
 
         for target_index in 0 .. self.peers() {
 
@@ -269,6 +280,67 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         self.channels.push((identifier, Box::new(on_new_pusher)));
 
         puller
+    }
+
+    fn progress_tracking_channel<T: Data + Clone>(&mut self, identifier: usize)
+                                  -> (Vec<Box<Push<Message<T>>>>, Box<Pull<Message<T>>>) {
+        // Create an `on_new_pusher` closure which will be repeatedly called by the `allocate` function;
+        // the inner allocator will not store the closure, as intra-process channels do not change over time.
+        let inner_peers = self.inner.peers();
+        let inner_sends1 = Rc::new(RefCell::new(Vec::with_capacity(inner_peers)));
+        let inner_sends2 = Rc::clone(&inner_sends1);
+
+        let on_new_inner_push = move |push| {
+            inner_sends1.borrow_mut().push(push);
+        };
+
+        let inner_recv = self.inner.allocate(identifier, on_new_inner_push);
+
+        // now inner has been filled-up
+        let mut pushers = Rc::try_unwrap(inner_sends2).ok().unwrap().into_inner();
+
+
+        // allocate a new pusher to the progress tracking send thread
+        let pt_index = std::usize::MAX; // TODO(lorenzo) maybe make this a constant
+
+        // message header template.
+        let header = MessageHeader {
+            channel:    identifier,
+            source:     self.index,
+            target:     pt_index,
+            length:     0,
+            seqno:      0,
+        };
+
+        let pt_pusher = Box::new(Pusher::new(header, Rc::clone(&self.pt_send)));
+
+        pushers.push(pt_pusher);
+
+        // TODO(lorenzo) progress_tracking_channel is called multiple times,
+        //   once for each scope.
+        //   => in the queue there are messages for several PT instances,
+        //      demux should be done with channel.identifier
+        //
+        //      demux returns a OneTimeViewer, which can be sent to the
+        //      CursorPuller via a shared Rc<RefCell<VecDeque<OneTimeViewer
+        //      the puller will drain the vec and look at the messages
+        //       (maybe implement read?)
+        //
+        // `await_events` will park and check for new events is the self.events `VecDeque`
+        // progress updates are events we should unpark on
+        // => pusher need to append an event when pushing something, puller needs to ??
+
+        let channel =
+            self.pt_to_local
+                .entry(identifier)
+                .or_insert_with(|| Rc::new(RefCell::new(VecDeque::new())))
+                .clone();
+
+        use crate::allocator::counters::Puller as CountPuller;
+        let canary = Canary::new(identifier, self.canaries.clone());
+        let puller = Box::new(CountPuller::new(CursorPullerInner::new(inner_recv, channel, canary), identifier, self.events().clone()));
+
+        (pushers, puller)
     }
 
     /// When a new worker process joins the computation, it would initiate connection to every other process
@@ -344,8 +416,10 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         }
         ::std::mem::drop(canaries);
 
+        // receive intra-process messages
         self.inner.receive();
 
+        // receive inter-process messages
         for recv in self.recvs.iter_mut() {
             recv.drain_into(&mut self.staged);
         }
@@ -380,6 +454,27 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                 }
             }
         }
+
+        // receive progress update messages
+        while let Some((channel_id, one_time_viewer)) = self.pt_cursor.demux_next() {
+
+            if let Some(channel_id) = channel_id {
+                // Increment message count for channel.
+                events.push_back((channel_id, Event::Pushed(1)));
+
+                // TODO(lorenzo) offset inside the one_time_viewer to discard the header!
+
+                // Send one_time_viewer to the puller, so that it will be able to read the progress update
+                self.pt_to_local
+                    .entry(channel_id)
+                    .or_insert_with(|| Rc::new(RefCell::new(VecDeque::new())))
+                    .borrow_mut()
+                    .push_back(one_time_viewer);
+            }
+            else {
+                println!("failed to read full header!");
+            }
+        }
     }
 
     // Perform postparatory work, most likely sending un-full binary buffers.
@@ -388,6 +483,8 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         for send in self.sends.iter_mut() {
             send.borrow_mut().publish();
         }
+
+        self.pt_send.borrow_mut().publish();
 
         // OPTIONAL: Tattle on channels sitting on borrowed data.
         // OPTIONAL: Perhaps copy borrowed data into owned allocation.

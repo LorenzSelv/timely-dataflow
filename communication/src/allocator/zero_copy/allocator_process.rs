@@ -154,6 +154,7 @@ impl Allocate for ProcessAllocator {
     #[inline(never)]
     fn receive(&mut self) {
 
+        panic!("TODO(lorenzo): this should not be used!");
         // Check for channels whose `Puller` has been dropped.
         let mut canaries = self.canaries.borrow_mut();
         for dropped_channel in canaries.drain(..) {

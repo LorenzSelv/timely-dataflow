@@ -13,6 +13,7 @@ use crate::{Data, Push, Pull};
 use crate::allocator::Message;
 
 use super::bytes_exchange::{BytesPush, SendEndpoint};
+use pubsub::queue::demux_cursor::RawOneViewCursor;
 
 /// An adapter into which one may push elements of type `T`.
 ///
@@ -147,6 +148,46 @@ impl<T:Data> Pull<Message<T>> for PullerInner<T> {
                 .borrow_mut()
                 .pop_front()
                 .map(|bytes| unsafe { Message::from_bytes(bytes) });
+
+            &mut self.current
+        }
+    }
+}
+
+/// TODO(lorenzo) doc
+pub struct CursorPullerInner<T> {
+    inner: Box<Pull<Message<T>>>,               // inner pullable (e.g. intra-process typed queue)
+    _canary: Canary,
+    current: Option<Message<T>>,
+    receiver: Rc<RefCell<VecDeque<RawOneViewCursor>>>,     // source of serialized buffers
+}
+
+impl<T:Data + Clone> CursorPullerInner<T> {
+    /// Creates a new `PullerInner` instance from a shared queue.
+    pub fn new(inner: Box<Pull<Message<T>>>, receiver: Rc<RefCell<VecDeque<RawOneViewCursor>>>, _canary: Canary) -> Self {
+        CursorPullerInner {
+            inner,
+            _canary,
+            current: None,
+            receiver,
+        }
+    }
+}
+
+impl<T:Data + Clone> Pull<Message<T>> for CursorPullerInner<T> {
+    #[inline]
+    fn pull(&mut self) -> &mut Option<Message<T>> {
+
+        let inner = self.inner.pull();
+        if inner.is_some() {
+            inner
+        }
+        else {
+            self.current =
+                self.receiver
+                    .borrow_mut()
+                    .pop_front()
+                    .map(|cursor| Message::from_cursor(cursor));
 
             &mut self.current
         }
