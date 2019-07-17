@@ -456,13 +456,14 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         }
 
         // receive progress update messages
-        while let Some((channel_id, one_time_viewer)) = self.pt_cursor.demux_next() {
+        while let Some((channel_id, mut one_time_viewer)) = self.pt_cursor.demux_next() {
 
             if let Some(channel_id) = channel_id {
                 // Increment message count for channel.
                 events.push_back((channel_id, Event::Pushed(1)));
 
-                // TODO(lorenzo) offset inside the one_time_viewer to discard the header!
+                // discard the header by incrementing the internal offset of the cursor
+                one_time_viewer.consume(std::mem::size_of::<MessageHeader>());
 
                 // Send one_time_viewer to the puller, so that it will be able to read the progress update
                 self.pt_to_local

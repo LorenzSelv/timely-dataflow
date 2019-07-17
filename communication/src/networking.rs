@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use abomonation::{encode, decode};
 
-// This constant is sent along immediately after establishing a TCP stream, so
-// that it is easy to sniff out Timely traffic when it is multiplexed with
-// other traffic on the same port.
-const HANDSHAKE_MAGIC: u64 = 0xc2f1fb770118add9;
+/// This constant is sent along immediately after establishing a TCP stream, so
+/// that it is easy to sniff out Timely traffic when it is multiplexed with
+/// other traffic on the same port.
+pub const HANDSHAKE_MAGIC: u64 = 0xc2f1fb770118add9;
 
 /// Framing data for each `Vec<u8>` transmission, indicating a typed channel, the source and
 /// destination workers, and the length in bytes.
