@@ -61,10 +61,7 @@ pub fn initialize_networking(
 
     let (rescaler_txs, rescaler_rxs) =
         (0..threads)
-            .map(|_| {
-                let (tx, rx) = std::sync::mpsc::channel();
-                (tx, Some(rx))
-            })
+            .map(|_| std::sync::mpsc::channel())
             .unzip();
 
     // TODO maybe keep the handle of the acceptor thread?
