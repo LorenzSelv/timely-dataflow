@@ -150,22 +150,28 @@ impl<T:Timestamp+Send> Progcaster<T> {
     }
 }
 
-pub trait ProgcasterHandle {
-
-    fn get_progress_state(&mut self) -> &[u8];
+pub trait ProgcasterServerHandle {
 
     fn start_recording(&mut self);
 
     fn stop_recording(&mut self);
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange);
+    fn get_progress_state(&mut self) -> &[u8];
+
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> &[u8];
 }
 
-impl<T: Timestamp> ProgcasterHandle for Progcaster<T> {
+pub trait ProgcasterClientHandle {
 
-    fn get_progress_state(&mut self) -> &[u8] {
-        unimplemented!()
-    }
+    fn set_progress_state(&mut self, state: &[u8]);
+
+    fn set_updates_range(&mut self, range: ProgressUpdatesRange, updates_range: &[u8]);
+
+    fn get_missing_updates_ranges(&mut self) -> Vec<ProgressUpdatesRange>;
+}
+
+
+impl<T: Timestamp> ProgcasterServerHandle for Progcaster<T> {
 
     fn start_recording(&mut self) {
         unimplemented!()
@@ -175,7 +181,26 @@ impl<T: Timestamp> ProgcasterHandle for Progcaster<T> {
         unimplemented!()
     }
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange) {
+    fn get_progress_state(&mut self) -> &[u8] {
+        unimplemented!()
+    }
+
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> &[u8] {
+        unimplemented!()
+    }
+}
+
+impl<T: Timestamp> ProgcasterClientHandle for Progcaster<T> {
+
+    fn set_progress_state(&mut self, state: &[u8]) {
+        unimplemented!()
+    }
+
+    fn get_missing_updates_ranges(&mut self) -> Vec<ProgressUpdatesRange> {
+        unimplemented!()
+    }
+
+    fn set_updates_range(&mut self, range: ProgressUpdatesRange, updates_range: &[u8]) {
         unimplemented!()
     }
 }
