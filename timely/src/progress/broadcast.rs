@@ -7,6 +7,101 @@ use crate::logging::TimelyLogger as Logger;
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::progress::rescaling::ProgressUpdatesRange;
+use std::collections::HashMap;
+use abomonation::Abomonation;
+
+struct ProgressState<T: Timestamp> {
+    change_batch: ChangeBatch<(Location,T)>,
+    worker_seqno: HashMap<usize, usize>,
+}
+
+impl<T: Timestamp> ProgressState<T> {
+
+    fn new() -> Self {
+        ProgressState {
+            change_batch: ChangeBatch::new(),
+            worker_seqno: HashMap::new(),
+        }
+    }
+
+    // TODO(lorenzo) after a rescaling operation is complete, we should track also the new worker in the state
+    fn new_worker(&mut self, worker_index: usize) {
+        unimplemented!();
+    }
+}
+
+impl<T: Timestamp+Abomonation> Abomonation for ProgressState<T> {}
+
+impl<T: Timestamp+Abomonation> ProgressState<T> {
+
+    fn encode(&mut self) -> Vec<u8> {
+        let mut buf = vec![0_u8; abomonation::measure(self)];
+        unsafe { abomonation::encode(self, &mut buf) }.expect("encode error");
+        buf
+    }
+
+    fn decode(encoded_state: &mut [u8]) -> Self {
+        unimplemented!();
+    }
+
+    fn update(&mut self, progress_msg: &ProgressMsg<T>) {
+        self.change_batch.extend(progress_msg.2.into_iter());
+    }
+}
+
+struct ProgressRecorder<T: Timestamp> {
+    worker_msgs: HashMap<usize, Vec<ProgressMsg<T>>>,
+}
+
+impl<T: Timestamp> ProgressRecorder<T> {
+    fn new() -> Self {
+        ProgressRecorder {
+            worker_msgs: HashMap::new(),
+        }
+    }
+
+    // TODO ref or clone?
+    fn append(&mut self, progress_msg: ProgressMsg<T>) {
+        self.worker_msgs
+            .entry(progress_msg.0)
+            .or_insert(Vec::new())
+            .push(progress_msg);
+    }
+}
+
+impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
+
+impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
+
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8> {
+
+        let msgs = self.worker_msgs.remove(&range.worker_index).expect("requested a range for missing worker index");
+
+        let seq_no_first = msgs[0].1;
+        let skip = range.seq_no_start - seq_no_first;
+        let range_size = range.seq_no_end - range.seq_no_start;
+
+        assert!(skip + range_size <= msgs.len());
+
+        let updates_range =
+            msgs
+                .into_iter()
+                .skip(skip)
+                .take(range_size)
+                .map(|msg| msg.2)
+                .flatten(); // each message has a vector of updates
+
+
+        let mut change_batch = ChangeBatch::new();
+        change_batch.extend(updates_range);
+
+        let acc = change_batch.into_inner();
+
+        let mut acc_buf = Vec::new();
+        unsafe { abomonation::encode(&acc, &mut acc_buf) }.expect("encode error");
+        acc_buf
+    }
+}
 
 /// A list of progress updates corresponding to `((child_scope, [in/out]_port, timestamp), delta)`
 pub type ProgressVec<T> = Vec<((Location, T), i64)>;
@@ -17,7 +112,7 @@ pub type ProgressMsg<T> = Message<(usize, usize, ProgressVec<T>)>;
 /// Manages broadcasting of progress updates to and receiving updates from workers.
 pub struct Progcaster<T:Timestamp> {
     to_push: Option<ProgressMsg<T>>,
-    pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>,
+    pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>, // TODO: this will become and hashmap, and we get the IDs from there
     puller: Box<Pull<ProgressMsg<T>>>,
     /// Source worker index
     source: usize,
@@ -36,7 +131,9 @@ pub struct Progcaster<T:Timestamp> {
     //                        ^source in the message
     //                                       ^guaranteed to be monotonically increasing (++), panic if not
     //        note: we also keep (my_index, SeqNo) to track which messages sent are included in the acc state
+    progress_state: ProgressState<T>,
 
+    recorder: Option<ProgressRecorder<T>>,
 
     logging: Option<Logger>,
 }
@@ -71,6 +168,8 @@ impl<T:Timestamp+Send> Progcaster<T> {
             addr,
             channel_identifier,
             logging,
+            progress_state: ProgressState::new(),
+            recorder: None, // not recording initially
         }
     }
 
@@ -109,6 +208,14 @@ impl<T:Timestamp+Send> Progcaster<T> {
                     )));
                 }
 
+                if let Some(message) = &self.to_push {
+                    // let clone = *message.clone();
+                    self.progress_state.update(message);
+                    if let Some(mut recorder) = &self.recorder {
+                        recorder.append(*message.clone());
+                    }
+                }
+
                 // TODO: This should probably use a broadcast channel.
                 pusher.push(&mut self.to_push);
                 pusher.done();
@@ -145,6 +252,12 @@ impl<T:Timestamp+Send> Progcaster<T> {
             for &(ref update, delta) in recv_changes.iter() {
                 changes.update(update.clone(), delta);
             }
+
+            self.progress_state.update(&message);
+
+            if let Some(mut recorder) = &self.recorder {
+                recorder.append(*message);
+            }
         }
 
     }
@@ -156,9 +269,9 @@ pub trait ProgcasterServerHandle {
 
     fn stop_recording(&mut self);
 
-    fn get_progress_state(&mut self) -> &[u8];
+    fn get_progress_state(&mut self) -> Vec<u8>;
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> &[u8];
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8>;
 }
 
 pub trait ProgcasterClientHandle {
@@ -174,19 +287,21 @@ pub trait ProgcasterClientHandle {
 impl<T: Timestamp> ProgcasterServerHandle for Progcaster<T> {
 
     fn start_recording(&mut self) {
-        unimplemented!()
+        assert!(self.recorder.is_none(), "TODO: handle concurrent rescaling operation?");
+        self.recorder = Some(ProgressRecorder::new());
     }
 
     fn stop_recording(&mut self) {
-        unimplemented!()
+        assert!(self.recorder.is_some());
+        self.recorder = None;
     }
 
-    fn get_progress_state(&mut self) -> &[u8] {
-        unimplemented!()
+    fn get_progress_state(&mut self) -> Vec<u8> {
+        self.progress_state.encode()
     }
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> &[u8] {
-        unimplemented!()
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8> {
+        self.recorder.unwrap().get_updates_range(range)
     }
 }
 

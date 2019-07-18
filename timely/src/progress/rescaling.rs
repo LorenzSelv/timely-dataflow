@@ -15,10 +15,14 @@ fn await_connection(address: String) -> TcpStream {
 
 #[derive(Clone,Abomonation)]
 pub struct ProgressUpdatesRange {
-    channel_id: usize,
-    worker_index: usize,
-    seq_no_start: usize, // inclusive
-    seq_no_end: usize,   // exclusive
+    /// identifier for the channel (also unique integer identifier for the scope)
+    pub channel_id: usize,
+    /// index of the worker
+    pub worker_index: usize,
+    /// inclusive start of the range seq_no_start..seq_no_end
+    pub seq_no_start: usize,
+    /// exclusive end of the range seq_no_start..seq_no_end
+    pub seq_no_end: usize,
 }
 
 fn read_decode<T: Abomonation>(stream: &mut TcpStream) -> T {
@@ -62,7 +66,7 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
         encode_write(&mut tcp_stream, &progress_state.len());
 
         // (3) write the encoded state
-        tcp_stream.write(progress_state).expect("write error");
+        tcp_stream.write(&progress_state[..]).expect("write error");
     }
 
     // handle range requests
@@ -88,7 +92,7 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
             encode_write(&mut tcp_stream, &updates_range.len());
 
             // write the updates_range
-            tcp_stream.write(updates_range).expect("failed to send range_updates to target worker");
+            tcp_stream.write(&updates_range[..]).expect("failed to send range_updates to target worker");
         }
     }
 
