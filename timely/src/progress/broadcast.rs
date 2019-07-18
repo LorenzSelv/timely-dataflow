@@ -6,6 +6,7 @@ use crate::communication::{Message, Push, Pull};
 use crate::logging::TimelyLogger as Logger;
 use std::rc::Rc;
 use std::cell::RefCell;
+use crate::progress::rescaling::ProgressUpdatesRange;
 
 /// A list of progress updates corresponding to `((child_scope, [in/out]_port, timestamp), delta)`
 pub type ProgressVec<T> = Vec<((Location, T), i64)>;
@@ -146,5 +147,35 @@ impl<T:Timestamp+Send> Progcaster<T> {
             }
         }
 
+    }
+}
+
+pub trait ProgcasterHandle {
+
+    fn get_progress_state(&mut self) -> &[u8];
+
+    fn start_recording(&mut self);
+
+    fn stop_recording(&mut self);
+
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange);
+}
+
+impl<T: Timestamp> ProgcasterHandle for Progcaster<T> {
+
+    fn get_progress_state(&mut self) -> &[u8] {
+        unimplemented!()
+    }
+
+    fn start_recording(&mut self) {
+        unimplemented!()
+    }
+
+    fn stop_recording(&mut self) {
+        unimplemented!()
+    }
+
+    fn get_updates_range(&mut self, range: ProgressUpdatesRange) {
+        unimplemented!()
     }
 }

@@ -3,15 +3,14 @@ use abomonation::Abomonation;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use crate::progress::broadcast::Progcaster;
-use crate::progress::Timestamp;
+use crate::progress::broadcast::{Progcaster, ProgcasterHandle};
 
 fn start_connection(address: String) -> TcpStream {}
 
 fn await_connection(address: String) -> TcpStream {}
 
 #[derive(Abomonation)]
-struct ProgressUpdatesRange {
+pub struct ProgressUpdatesRange {
     channel_id: usize,
     worker_index: usize,
     seq_no_start: usize, // inclusive
@@ -35,7 +34,7 @@ fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: T) {
 
 /// TODO documentation
 /// TODO Arc<Vec<Mutex ?
-pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Mutex<Boc<dyn ProgcasterHandle>>>>) {
+pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Mutex<Box<dyn ProgcasterHandle>>>>) {
 
     // connect to target_address
     let mut tcp_stream = start_connection(target_address);
@@ -108,7 +107,7 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
     // serve target worker requests for ProgUpdate message ranges
 }
 
-pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<HashMap<usize, Arc<Mutex<Progcaster<dyn Timestamp>>>>>) {
+pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<HashMap<usize, Mutex<Box<dyn ProgcasterHandle>>>>) {
 
     // receive `state`
     let mut tcp_stream = await_connection(source_address);
