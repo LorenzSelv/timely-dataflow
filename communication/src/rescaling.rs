@@ -2,9 +2,22 @@
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
-use std::net::TcpListener;
+use std::net::{TcpListener, SocketAddrV4, TcpStream, Ipv4Addr};
 use crate::networking::recv_handshake;
 use crate::allocator::zero_copy::initialize::{LogSender, spawn_send_thread, spawn_recv_thread};
+use abomonation::Abomonation;
+use std::io::Read;
+
+/// Information to perform the rescaling
+pub struct RescaleMessage {
+    /// to share a TODO merge queue
+    pub promise: Sender<MergeQueue>,
+    /// to share a TODO merge queue
+    pub future: Receiver<MergeQueue>,
+    /// if Some, then the worker has been selected to bootstrap the new worker.
+    /// It should connect to that address and init the new worker progress tracker.
+    pub bootstrap_addr: Option<SocketAddrV4>
+}
 
 /// code to be executed in the acceptor (or rescaler) thread.
 ///
@@ -21,14 +34,17 @@ pub fn rescaler(my_index: usize,
                 my_address: String,
                 threads: usize,
                 log_sender: Arc<LogSender>,
-                rescaler_txs: Vec<Sender<(Sender<MergeQueue>, Receiver<MergeQueue>)>>)
+                rescaler_txs: Vec<Sender<RescaleMessage>>)
 {
     let listener = TcpListener::bind(my_address).expect("Bind failed");
 
     loop {
         let mut stream = listener.accept().expect("Accept failed").0;
         let new_worker_index = recv_handshake(&mut stream).expect("Handshake failed");
-        println!("worker {}:\tconnection from worker {}", my_index, new_worker_index);
+
+        let bootstrap_addr = get_bootstrap_addr(&mut stream);
+
+        println!("worker {}:\tconnection from worker {}, bootstrap address is {:?}", my_index, new_worker_index, bootstrap_addr);
 
         // For queues from worker threads to the send network thread
         let (mut network_promise, worker_futures) = crate::promise_futures(1, threads);
@@ -48,8 +64,32 @@ pub fn rescaler(my_index: usize,
             .iter()
             .zip(worker_promises.into_iter().flatten())
             .zip(worker_futures.into_iter().flatten())
-            .for_each(|((tx, promises), futures)| {
-                tx.send((promises, futures)).expect("Send (promise/future) failed");
+            .for_each(|((tx, promise), future)| {
+                let rescale_message = RescaleMessage {
+                    promise,
+                    future,
+                    bootstrap_addr,
+                };
+                tx.send(rescale_message).expect("Send RescaleMessage failed");
             });
     }
+}
+
+fn read_decode<T: Abomonation + Clone>(stream: &mut TcpStream) -> T {
+    // note: supports only fixed-size types
+    let mut buf = vec![0_u8; std::mem::size_of::<T>()];
+    stream.read_exact(&mut buf[..]).expect("read_exact error");
+    let (typed, remaining) = unsafe { abomonation::decode::<T>(&mut buf[..]) }.expect("decode error");
+    assert_eq!(remaining.len(), 0);
+    typed.clone()
+}
+
+fn get_bootstrap_addr(mut stream: &mut TcpStream) -> Option<SocketAddrV4> {
+
+    let selected: bool = read_decode(&mut stream);
+    let ip: u32 = read_decode(&mut stream);
+    let port: u16 = read_decode(&mut stream);
+
+    if selected { Some(SocketAddrV4::new(Ipv4Addr::from(ip), port)) }
+    else { None }
 }

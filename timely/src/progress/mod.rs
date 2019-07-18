@@ -13,6 +13,7 @@ pub mod operate;
 pub mod broadcast;
 pub mod reachability;
 pub mod subgraph;
+pub mod rescaling;
 
 /// A timely dataflow location.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Abomonation, Serialize, Deserialize)]

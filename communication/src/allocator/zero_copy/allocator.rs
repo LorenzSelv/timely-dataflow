@@ -9,12 +9,13 @@ use bytes::arc::Bytes;
 use crate::networking::MessageHeader;
 
 use crate::{Allocate, Message, Data, Pull};
-use crate::allocator::{AllocateBuilder, OnNewPushFn};
+use crate::allocator::{AllocateBuilder, OnNewPushFn, BootstrapClosure};
 use crate::allocator::Event;
 use crate::allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
+use crate::rescaling::RescaleMessage;
 
 /// Builds an instance of a TcpAllocator.
 ///
@@ -30,7 +31,7 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     promises:   Vec<Sender<MergeQueue>>,    // to send queues from each network thread.
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
-    rescaler_rx: Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>,
+    rescaler_rx: Receiver<RescaleMessage>,
 }
 
 /// Creates a vector of builders, sharing appropriate state.
@@ -50,7 +51,7 @@ pub fn new_vector<A: AllocateBuilder>(
     allocators: Vec<A>,
     my_process: usize,
     processes: usize,
-    rescaler_rxs: Vec<Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>>)
+    rescaler_rxs: Vec<Receiver<RescaleMessage>>)
 -> (Vec<TcpBuilder<A>>,
     Vec<Vec<Sender<MergeQueue>>>,
     Vec<Vec<Receiver<MergeQueue>>>)
@@ -147,7 +148,7 @@ pub struct TcpAllocator<A: Allocate> {
     to_local:   HashMap<usize, Rc<RefCell<VecDeque<Bytes>>>>,   // to worker-local typed pullers.
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
-    rescaler_rx: Receiver<(Sender<MergeQueue>, Receiver<MergeQueue>)>,
+    rescaler_rx: Receiver<RescaleMessage>,
 
     // store channels allocated so far, so that we can back-fill them with
     // new pushers by calling the associated closur when a new worker process joins the cluster
@@ -246,24 +247,36 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     ///
     /// The number of peers (total number of worker threads in the computation) is also updated.
     /// As a result, you should *not* rely on the number of peers to remain unchanged.
-    fn rescale(&mut self) {
+    fn rescale(&mut self, bootstrap_closure: impl BootstrapClosure) {
         // try receiving from the rescale thread - did any new worker process initiated a connection?
-        if let Ok((promise, future)) = self.rescaler_rx.try_recv() {
-            // a new process joined. The rescaler thread spawned a new pair of network thread
+        if let Ok(rescale_message) = self.rescaler_rx.try_recv() {
+
+            let RescaleMessage { promise, future, bootstrap_addr } = rescale_message;
+
+            // A new process joined. The rescaler thread spawned a new pair of network thread
             // for sending/receiving from this new worker process. We need to setup shared `MergeQueue`
             // with those threads. The protocol is the same as the initialization code.
 
-            // update recvs and sends
-            self.recvs.push(fulfill_promise(promise));
-
+            let new_recv = fulfill_promise(promise);
             let new_send = extract_future(future);
-            self.sends.push(new_send.clone());
 
+            // update recvs and sends
+            self.sends.push(new_send.clone());
+            self.recvs.push(new_recv);
+
+
+            if let Some(addr) = bootstrap_addr {
+                // We were selected to bootstrap the progress tracker of the new worker,
+                // spawn the bootstrap thread
+
+                let _handle = std::thread::spawn(move || bootstrap_closure(addr));
+            }
+
+            // back-fill existing channels with `threads` new pushers pointing to the new send
             let threads = self.inner.peers();
             let self_index = self.index;
             let self_peers = self.peers;
 
-            // back-fill existing channels with `threads` new pushers pointing to the new send
             for (channel_id, on_new_pusher) in self.channels.iter_mut() {
 
                 // ASSUMPTION: if there are currently P processes, then

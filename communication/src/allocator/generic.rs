@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use crate::allocator::thread::ThreadBuilder;
 use crate::allocator::process::ProcessBuilder as TypedProcessBuilder;
-use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process, OnNewPushFn};
+use crate::allocator::{Allocate, AllocateBuilder, Event, Thread, Process, OnNewPushFn, BootstrapClosure};
 use crate::allocator::zero_copy::allocator_process::{ProcessBuilder, ProcessAllocator};
 use crate::allocator::zero_copy::allocator::{TcpBuilder, TcpAllocator};
 
@@ -61,12 +61,10 @@ impl Generic {
 
     /// Rescale the allocator if a changed occurred in the cluster
     /// Only ZeroCopy (`TcpAllocator`) actually does something, for the others it's a nop.
-    fn rescale(&mut self) {
+    fn rescale(&mut self, bootstrap: impl BootstrapClosure) {
         match self {
-            &mut Generic::Thread(ref mut t) => t.rescale(),
-            &mut Generic::Process(ref mut p) => p.rescale(),
-            &mut Generic::ProcessBinary(ref mut pb) => pb.rescale(),
-            &mut Generic::ZeroCopy(ref mut z) => z.rescale(),
+            &mut Generic::ZeroCopy(ref mut z) => z.rescale(bootstrap),
+            _ => {} // no-op for the others
         }
     }
 
@@ -107,8 +105,8 @@ impl Allocate for Generic {
         self.allocate(identifier, on_new_pusher)
     }
 
-    fn rescale(&mut self) {
-        self.rescale();
+    fn rescale(&mut self, bootstrap: impl BootstrapClosure) {
+        self.rescale(bootstrap);
     }
 
     fn receive(&mut self) { self.receive(); }

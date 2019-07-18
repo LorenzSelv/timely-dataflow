@@ -19,6 +19,7 @@ pub mod counters;
 pub mod zero_copy;
 
 use crate::{Data, Push, Pull, Message};
+use std::net::SocketAddrV4;
 
 /// A proto-allocator, which implements `Send` and can be completed with `build`.
 ///
@@ -44,6 +45,11 @@ pub trait AllocateBuilder : Send {
 /// The actual back-filling is performed on-demand when calling the `rescale` function.
 pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
 impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
+
+/// TODO(lorenzo) doc
+pub trait BootstrapClosure : Fn(SocketAddrV4) + Send + 'static {}
+impl <F: Fn(SocketAddrV4) + Send + 'static> BootstrapClosure for F {}
+
 
 /// A type capable of allocating channels.
 ///
@@ -74,7 +80,8 @@ pub trait Allocate {
     /// The `ExchangePusher` relies on the modulo operator, and thus on a constant number of peers
     /// to maintain correctness. This needs to be updated to use a routing table, or to require the usage
     /// of Megaphone that keeps the routing table for us.
-    fn rescale(&mut self) { /* nop by default */ }
+    /// TODO(lorenzo): explain bootstrap closure
+    fn rescale(&mut self, _bootstrap: impl BootstrapClosure) { /* nop by default */ }
 
     /// A shared queue of communication events with channel identifier.
     ///

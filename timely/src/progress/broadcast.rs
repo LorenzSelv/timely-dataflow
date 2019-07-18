@@ -27,6 +27,16 @@ pub struct Progcaster<T:Timestamp> {
     /// Communication channel identifier
     channel_identifier: usize,
 
+    // TODO(lorenzo)
+    //    we need to maintain accumulate state, so that we can bootstrap workers during rescaling
+    //    state:
+    //      * compacted ChangeBatch: all updates ever sent/recved accumulated
+    //      * hashmap of (worker_index) -> SeqNo
+    //                        ^source in the message
+    //                                       ^guaranteed to be monotonically increasing (++), panic if not
+    //        note: we also keep (my_index, SeqNo) to track which messages sent are included in the acc state
+
+
     logging: Option<Logger>,
 }
 
