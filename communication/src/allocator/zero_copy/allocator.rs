@@ -269,7 +269,10 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                 // We were selected to bootstrap the progress tracker of the new worker,
                 // spawn the bootstrap thread
 
-                let _handle = std::thread::spawn(move || bootstrap_closure(addr));
+                // cannot send some of the progcaster members (Rc stuff) to other thread safely,
+                // need to call the closure directly
+                // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
+                bootstrap_closure(addr);
             }
 
             // back-fill existing channels with `threads` new pushers pointing to the new send

@@ -223,7 +223,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 internal: Vec::new(),
             }));
 
-            // TODO(lorenzo) <======================================================
             Progcaster::fill_message(&mut self.to_progress_state, self.source, self.counter, &mut changes);
 
             if let Some(message) = &self.to_progress_state {
@@ -301,7 +300,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 recorder.append(Message::from_typed(tuple));
             }
         }
-
     }
 }
 
@@ -385,7 +383,14 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
 
     fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8> {
         let mut progcaster = self.lock().ok().expect("mutex error");
+
         if let Some(recorder) = &mut progcaster.recorder {
+            // TODO(lorenzo) we might not have the requested range yet! If that's the case, we should
+            //               pull from the channel until we do.
+//            while !recorder.has_update_range() {
+//                progcaster.do_something();
+//            }
+
             recorder.get_updates_range(range)
         } else {
             panic!("asking for ranges but recorder is None");
