@@ -42,7 +42,7 @@ fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
 
 /// TODO documentation
 /// TODO Arc<Vec<Mutex ?
-pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Mutex<Box<dyn ProgcasterServerHandle>>>>) {
+pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Mutex<Arc<dyn ProgcasterServerHandle>>>>) {
 
     // connect to target_address
     let mut tcp_stream = start_connection(target_address);
@@ -143,7 +143,7 @@ pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<Hash
 
     for (channel_id, encoded_state) in states.into_iter() {
         let mut progcaster = progcasters[&channel_id].lock().ok().expect("mutex error");
-        progcaster.set_progress_state(&encoded_state[..]);
+        progcaster.set_progress_state(encoded_state);
 
         let missing_ranges = progcaster.get_missing_updates_ranges();
 
@@ -159,7 +159,7 @@ pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<Hash
             let mut updates_range_buf = vec![0_u8; updates_range_size];
             tcp_stream.read_exact(&mut updates_range_buf[..]).expect("read_exact error");
 
-            progcaster.set_updates_range(range, &updates_range_buf[..]);
+            progcaster.apply_updates_range(range, updates_range_buf);
         }
     }
 

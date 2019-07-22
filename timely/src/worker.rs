@@ -67,6 +67,13 @@ pub struct Worker<A: Allocate> {
     activations: Rc<RefCell<Activations>>,
     active_dataflows: Vec<usize>,
 
+    // for each subgraph progcaster this worker has in all its dataflows, keep
+    // a reference protected by mutex for exclusive access.
+    // During rescaling, these references will be passed to the bootstrap thread that
+    // will initialize the state of the associated progcaster.
+    progcaster_server_handles: Arc<HashMap<usize, Mutex<Arc<dyn ProgcasterServerHandle>>>>,
+    progcaster_client_handles: Arc<HashMap<usize, Mutex<Arc<dyn ProgcasterClientHandle>>>>,
+
     // Temporary storage for channel identifiers during dataflow construction.
     // These are then associated with a dataflow once constructed.
     temp_channel_ids: Rc<RefCell<Vec<usize>>>,
@@ -120,6 +127,8 @@ impl<A: Allocate> Worker<A> {
             logging: Rc::new(RefCell::new(crate::logging_core::Registry::new(now, index))),
             activations: Rc::new(RefCell::new(Activations::new())),
             active_dataflows: Vec::new(),
+            progcaster_server_handles: Arc::new(HashMap::new()),
+            progcaster_client_handles: Arc::new(HashMap::new()),
             temp_channel_ids: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -182,7 +191,7 @@ impl<A: Allocate> Worker<A> {
             let mut allocator = self.allocator.borrow_mut();
             // If a new worker joined the cluster, back-fill all allocated channels (nop otherwise)
             // TODO(lorenzo) create handles
-            allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, handles));
+            allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, self.progcaster_server_handles));
             allocator.receive();
             let events = allocator.events().clone();
             let mut borrow = events.borrow_mut();
@@ -455,6 +464,8 @@ impl<A: Allocate> Worker<A> {
 }
 
 use crate::communication::Message;
+use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
+use std::sync::{Arc, Mutex};
 
 impl<A: Allocate> Clone for Worker<A> {
     fn clone(&self) -> Self {
@@ -468,6 +479,8 @@ impl<A: Allocate> Clone for Worker<A> {
             logging: self.logging.clone(),
             activations: self.activations.clone(),
             active_dataflows: Vec::new(),
+            progcaster_server_handles: Arc::clone(&self.progcaster_server_handles),
+            progcaster_client_handles: Arc::clone(&self.progcaster_client_handles),
             temp_channel_ids: self.temp_channel_ids.clone(),
         }
     }
