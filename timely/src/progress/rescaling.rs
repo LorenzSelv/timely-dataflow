@@ -42,7 +42,7 @@ fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
 
 /// TODO documentation
 /// TODO Arc<Vec<Mutex ?
-pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Mutex<Arc<dyn ProgcasterServerHandle>>>>) {
+pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Arc<Mutex<ProgcasterServerHandle>>>>) {
 
     // connect to target_address
     let mut tcp_stream = start_connection(target_address);
@@ -122,8 +122,6 @@ pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<Hash
 
     let mut states = Vec::with_capacity(progcasters.len());
 
-    let mut usize_buf = Vec::with_capacity(std::mem::size_of::<usize>());
-
     for _ in 0..states.len() {
 
         // (1) read channel_id
@@ -138,8 +136,6 @@ pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<Hash
 
         states.push((channel_id, state_buf));
     }
-
-    let mut request_buf = Vec::with_capacity(std::mem::size_of::<ProgressUpdatesRange>());
 
     for (channel_id, encoded_state) in states.into_iter() {
         let mut progcaster = progcasters[&channel_id].lock().ok().expect("mutex error");

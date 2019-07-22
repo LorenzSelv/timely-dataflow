@@ -5,6 +5,8 @@ use std::cell::RefCell;
 
 use crate::scheduling::Schedule;
 use crate::progress::{Timestamp, ChangeBatch, Antichain};
+use std::collections::HashMap;
+use crate::progress::broadcast::{ProgcasterClientHandle, ProgcasterServerHandle};
 
 /// Methods for describing an operators topology, and the progress it makes.
 pub trait Operate<T: Timestamp> : Schedule {
@@ -56,6 +58,15 @@ pub trait Operate<T: Timestamp> : Schedule {
 
     /// Indicates of whether the operator requires `push_external_progress` information or not.
     fn notify_me(&self) -> bool { true }
+
+    /// Return handles to all wrapped progcasters. If the operator is a subgraph with nested
+    /// scopes. A handle to all its nested scopes progcaster will be returned, identified by
+    /// the allocated channel id.
+    ///
+    /// By default returns nothing, as most operator are not wrapping any progcasters.
+    fn get_progcasters_handles(&self) -> (HashMap<usize, Box<dyn ProgcasterClientHandle>>, HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
+        (HashMap::new(), HashMap::new())
+    }
 }
 
 /// Progress information shared between parent and child.

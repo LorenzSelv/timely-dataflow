@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Reverse;
 
 use crate::logging::TimelyLogger as Logger;
@@ -20,9 +20,10 @@ use crate::progress::{Timestamp, Operate, operate::SharedProgress};
 use crate::progress::{Location, Port, Source, Target};
 
 use crate::progress::ChangeBatch;
-use crate::progress::broadcast::Progcaster;
+use crate::progress::broadcast::{Progcaster, ProgcasterClientHandle, ProgcasterServerHandle};
 use crate::progress::reachability;
 use crate::progress::timestamp::Refines;
+use std::sync::{Arc, Mutex};
 
 // IMPORTANT : by convention, a child identifier of zero is used to indicate inputs and outputs of
 // the Subgraph itself. An identifier greater than zero corresponds to an actual child, which can
@@ -167,7 +168,27 @@ where
 
         let (tracker, scope_summary) = builder.build();
 
+
+        let mut progcasters_client_handles = HashMap::new();
+        let mut progcasters_server_handles = HashMap::new();
+
+        // collect all progcasters wrapped by the children operator
+        for child in self.children.iter() {
+            if let Some(operator) = child.operator {
+                let (client_handles, server_handles) = operator.get_progcasters_handles();
+                progcasters_client_handles.extend(client_handles);
+                progcasters_server_handles.extend(server_handles);
+            }
+        }
+
+        // allocate a new progcaster for this subgraph
         let progcaster = Progcaster::new(worker, &self.path, self.logging.clone());
+        let progcaster_id = progcaster.channel_id();
+        let progcaster = Arc::new(Mutex::new(progcaster));
+
+        // create handles for the subgraph progcaster
+        progcasters_client_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
+        progcasters_client_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
 
         let mut incomplete = vec![true; self.children.len()];
         incomplete[0] = false;
@@ -193,6 +214,8 @@ where
             local_pointstamp: ChangeBatch::new(),
             final_pointstamp: ChangeBatch::new(),
             progcaster,
+            progcasters_client_handles,
+            progcasters_server_handles,
             pointstamp_tracker: tracker,
 
             shared_progress: Rc::new(RefCell::new(SharedProgress::new(inputs, outputs))),
@@ -244,7 +267,11 @@ where
     pointstamp_tracker: reachability::Tracker<TInner>,
 
     // channel / whatever used to communicate pointstamp updates to peers.
-    progcaster: Progcaster<TInner>,
+    progcaster: Arc<Mutex<Progcaster<TInner>>>,
+
+    // handles to the wrapped progcasters
+    progcasters_client_handles: HashMap<usize, Box<dyn ProgcasterClientHandle>>,
+    progcasters_server_handles: HashMap<usize, Box<dyn ProgcasterServerHandle>>,
 
     shared_progress: Rc<RefCell<SharedProgress<TOuter>>>,
     scope_summary: Vec<Vec<Antichain<TInner::Summary>>>,
@@ -272,7 +299,7 @@ where
         self.harvest_inputs();          // Count records entering the scope.
 
         // Receive post-exchange progress updates.
-        self.progcaster.recv(&mut self.final_pointstamp);
+        self.progcaster.lock().ok().expect("mutex error").recv(&mut self.final_pointstamp);
 
         // Commit and propagate final pointstamps.
         self.propagate_pointstamps();
@@ -491,8 +518,10 @@ where
                 )
         };
 
+        let progcaster = self.progcaster.lock().ok().expect("mutex error");
+
         if must_send {
-            self.progcaster.send(&mut self.local_pointstamp);
+            progcaster.send(&mut self.local_pointstamp);
         }
     }
 }

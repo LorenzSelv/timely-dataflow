@@ -71,8 +71,8 @@ pub struct Worker<A: Allocate> {
     // a reference protected by mutex for exclusive access.
     // During rescaling, these references will be passed to the bootstrap thread that
     // will initialize the state of the associated progcaster.
-    progcaster_server_handles: Arc<HashMap<usize, Mutex<Arc<dyn ProgcasterServerHandle>>>>,
-    progcaster_client_handles: Arc<HashMap<usize, Mutex<Arc<dyn ProgcasterClientHandle>>>>,
+    progcaster_server_handles: HashMap<usize, Box<dyn ProgcasterServerHandle>>,
+    progcaster_client_handles: HashMap<usize, Box<dyn ProgcasterClientHandle>>,
 
     // Temporary storage for channel identifiers during dataflow construction.
     // These are then associated with a dataflow once constructed.
@@ -127,8 +127,8 @@ impl<A: Allocate> Worker<A> {
             logging: Rc::new(RefCell::new(crate::logging_core::Registry::new(now, index))),
             activations: Rc::new(RefCell::new(Activations::new())),
             active_dataflows: Vec::new(),
-            progcaster_server_handles: Arc::new(HashMap::new()),
-            progcaster_client_handles: Arc::new(HashMap::new()),
+            progcaster_server_handles: HashMap::new(),
+            progcaster_client_handles: HashMap::new(),
             temp_channel_ids: Rc::new(RefCell::new(Vec::new())),
         }
     }
@@ -191,7 +191,7 @@ impl<A: Allocate> Worker<A> {
             let mut allocator = self.allocator.borrow_mut();
             // If a new worker joined the cluster, back-fill all allocated channels (nop otherwise)
             // TODO(lorenzo) create handles
-            allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, self.progcaster_server_handles));
+            // allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, self.progcaster_server_handles));
             allocator.receive();
             let events = allocator.events().clone();
             let mut borrow = events.borrow_mut();
@@ -429,6 +429,11 @@ impl<A: Allocate> Worker<A> {
 
         let mut operator = subscope.into_inner().build(self);
 
+        let (client_handles, server_handles) = operator.get_progcasters_handles();
+
+        self.progcaster_client_handles.extend(client_handles);
+        self.progcaster_server_handles.extend(server_handles);
+
         logging.as_mut().map(|l| l.log(crate::logging::OperatesEvent {
             id: identifier,
             addr: operator.path().to_vec(),
@@ -465,7 +470,6 @@ impl<A: Allocate> Worker<A> {
 
 use crate::communication::Message;
 use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
-use std::sync::{Arc, Mutex};
 
 impl<A: Allocate> Clone for Worker<A> {
     fn clone(&self) -> Self {
@@ -479,8 +483,8 @@ impl<A: Allocate> Clone for Worker<A> {
             logging: self.logging.clone(),
             activations: self.activations.clone(),
             active_dataflows: Vec::new(),
-            progcaster_server_handles: Arc::clone(&self.progcaster_server_handles),
-            progcaster_client_handles: Arc::clone(&self.progcaster_client_handles),
+            progcaster_server_handles: self.progcaster_server_handles.clone(),
+            progcaster_client_handles: self.progcaster_client_handles.clone(),
             temp_channel_ids: self.temp_channel_ids.clone(),
         }
     }

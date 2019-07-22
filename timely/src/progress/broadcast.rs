@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use crate::progress::rescaling::ProgressUpdatesRange;
 use std::collections::{HashMap, HashSet};
 use abomonation::Abomonation;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 struct ProgressState<T: Timestamp> {
@@ -202,6 +203,10 @@ impl<T:Timestamp+Send> Progcaster<T> {
         }
     }
 
+    pub fn channel_id(&self) -> usize {
+        self.channel_identifier
+    }
+
     /// Sends pointstamp changes to all workers.
     pub fn send(&mut self, changes: &mut ChangeBatch<(Location, T)>) {
 
@@ -294,74 +299,81 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
 pub trait ProgcasterServerHandle {
 
-    fn start_recording(&mut self);
+    fn start_recording(&self);
 
-    fn stop_recording(&mut self);
+    fn stop_recording(&self);
 
-    fn get_progress_state(&mut self) -> Vec<u8>;
+    fn get_progress_state(&self) -> Vec<u8>;
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8>;
+    fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8>;
 }
 
 pub trait ProgcasterClientHandle {
 
-    fn set_progress_state(&mut self, state: Vec<u8>);
+    fn set_progress_state(&self, state: Vec<u8>);
 
-    fn apply_updates_range(&mut self, range: ProgressUpdatesRange, updates_range: Vec<u8>);
+    fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>);
 
-    fn get_missing_updates_ranges(&mut self) -> Vec<ProgressUpdatesRange>;
+    fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange>;
 
-    fn apply_stashed_progress_msgs(&mut self);
+    fn apply_stashed_progress_msgs(&self);
 }
 
 
-impl<T: Timestamp> ProgcasterServerHandle for Progcaster<T> {
+impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
 
-    fn start_recording(&mut self) {
-        assert!(self.recorder.is_none(), "TODO: handle concurrent rescaling operation?");
-        self.recorder = Some(ProgressRecorder::new());
+    fn start_recording(&self) {
+        let progcaster = self.lock().ok().expect("mutex error");
+        assert!(progcaster.recorder.is_none(), "TODO: handle concurrent rescaling operation?");
+        progcaster.recorder = Some(ProgressRecorder::new());
     }
 
-    fn stop_recording(&mut self) {
-        assert!(self.recorder.is_some());
-        self.recorder = None;
+    fn stop_recording(&self) {
+        let progcaster = self.lock().ok().expect("mutex error");
+        assert!(progcaster.recorder.is_some());
+        progcaster.recorder = None;
     }
 
-    fn get_progress_state(&mut self) -> Vec<u8> {
-        self.progress_state.encode()
+    fn get_progress_state(&self) -> Vec<u8> {
+        let progcaster = self.lock().ok().expect("mutex error");
+        progcaster.progress_state.encode()
     }
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8> {
-        self.recorder.unwrap().get_updates_range(range)
+    fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8> {
+        let progcaster = self.lock().ok().expect("mutex error");
+        progcaster.recorder.unwrap().get_updates_range(range)
     }
 }
 
-impl<T: Timestamp> ProgcasterClientHandle for Progcaster<T> {
+impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
 
-    fn set_progress_state(&mut self, state: Vec<u8>) {
-        self.progress_state = ProgressState::decode(state);
+    fn set_progress_state(&self, state: Vec<u8>) {
+        let progcaster = self.lock().ok().expect("mutex error");
+        progcaster.progress_state = ProgressState::decode(state);
     }
 
-    fn get_missing_updates_ranges(&mut self) -> Vec<ProgressUpdatesRange> {
+    fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange> {
 
-        let mut worker_todo: HashSet<usize> = self.progress_state.worker_seqno.keys().map(|x| *x).collect();
+        let progcaster = self.lock().ok().expect("mutex error");
+
+        let mut worker_todo: HashSet<usize> = progcaster.progress_state.worker_seqno.keys().map(|x| *x).collect();
 
         let mut missing_ranges = Vec::new();
 
         while !worker_todo.is_empty() {
 
-            while let Some(message) = self.puller.pull() {
+            while let Some(message) = progcaster.puller.pull() {
                 let worker_index = message.0;
                 let msg_seq_no = message.1;
                 let progress_vec = &message.2;
 
                 // state_seq_no is the next message that we should read and apply to the state
-                let state_seq_no = *self.progress_state.worker_seqno.get(&worker_index).expect("msg from unknown worker");
+                let state_seq_no = *progcaster.progress_state.worker_seqno.get(&worker_index).expect("msg from unknown worker");
 
                 // if the message is not included in the state, we need to stash it
                 // so we can apply it later
                 if state_seq_no <= msg_seq_no {
-                    self.progress_msg_stash.push(*message); // TODO(lorenzo) do not dereference here
+                    progcaster.progress_msg_stash.push(*message); // TODO(lorenzo) do not dereference here
                 }
 
                 if worker_todo.contains(&worker_index) {
@@ -371,7 +383,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Progcaster<T> {
                         // we will read `msg_seq_no` and all the following updates, but we need to ask
                         // for the missing range [state_seq_no..msg_seq_no[
                         let missing_range = ProgressUpdatesRange {
-                            channel_id: self.channel_identifier,
+                            channel_id: progcaster.channel_identifier,
                             worker_index,
                             seq_no_start: state_seq_no,
                             seq_no_end: msg_seq_no,
@@ -388,12 +400,14 @@ impl<T: Timestamp> ProgcasterClientHandle for Progcaster<T> {
         missing_ranges
     }
 
-    fn apply_updates_range(&mut self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
-        self.progress_state.apply_updates_range(range, updates_range)
+    fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
+        let progcaster = self.lock().ok().expect("mutex error");
+        progcaster.progress_state.apply_updates_range(range, updates_range)
     }
 
-    fn apply_stashed_progress_msgs(&mut self) {
-        self.progress_msg_stash.iter().for_each(|message| self.progress_state.update(message));
-        self.progress_msg_stash.clear();
+    fn apply_stashed_progress_msgs(&self) {
+        let progcaster = self.lock().ok().expect("mutex error");
+        progcaster.progress_msg_stash.iter().for_each(|message| progcaster.progress_state.update(message));
+        progcaster.progress_msg_stash.clear();
     }
 }
