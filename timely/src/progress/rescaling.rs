@@ -1,18 +1,20 @@
-use std::net::TcpStream;
+//! TODO
+use std::net::{TcpStream, SocketAddrV4};
 use abomonation::Abomonation;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::collections::HashMap;
 use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
 
-fn start_connection(address: String) -> TcpStream {
+fn start_connection(_address: SocketAddrV4) -> TcpStream {
     unimplemented!()
 }
 
-fn await_connection(address: String) -> TcpStream {
+fn await_connection(_address: String) -> TcpStream {
     unimplemented!()
 }
 
+/// Identifies a range of progress updates
 #[derive(Clone,Abomonation)]
 pub struct ProgressUpdatesRange {
     /// identifier for the channel (also unique integer identifier for the scope)
@@ -25,7 +27,7 @@ pub struct ProgressUpdatesRange {
     pub seq_no_end: usize,
 }
 
-fn read_decode<T: Abomonation>(stream: &mut TcpStream) -> T {
+fn read_decode<T: Abomonation + Copy>(stream: &mut TcpStream) -> T {
     // note: supports only fixed-size types
     let mut buf = vec![0_u8; std::mem::size_of::<T>()];
     stream.read_exact(&mut buf[..]).expect("read_exact error");
@@ -42,7 +44,7 @@ fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
 
 /// TODO documentation
 /// TODO Arc<Vec<Mutex ?
-pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<usize, Arc<Mutex<ProgcasterServerHandle>>>>) {
+pub fn bootstrap_worker_server(target_address: SocketAddrV4, progcasters: HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
 
     // connect to target_address
     let mut tcp_stream = start_connection(target_address);
@@ -50,7 +52,6 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
     let mut states = Vec::with_capacity(progcasters.len());
 
     for (&channel_id, progcaster) in progcasters.iter() {
-        let mut progcaster = progcaster.lock().ok().expect("mutex error");
         let progress_state = progcaster.get_progress_state();
         progcaster.start_recording();
 
@@ -81,12 +82,12 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
         } else {
             assert_eq!(read, request_buf.len());
 
-            let (&range_req, remaining) = unsafe { abomonation::decode::<ProgressUpdatesRange>(&mut request_buf[..]) }.expect("decode error");
+            let (range_req, remaining) = unsafe { abomonation::decode::<ProgressUpdatesRange>(&mut request_buf[..]) }.expect("decode error");
             assert_eq!(remaining.len(), 0);
 
-            let mut progcaster = progcasters[&range_req.channel_id].lock().ok().expect("mutex error");
+            let progcaster = &progcasters[&range_req.channel_id];
 
-            let updates_range = progcaster.get_updates_range(range_req);
+            let updates_range = progcaster.get_updates_range(range_req.clone());
 
             // write the size of the encoded updates_range
             encode_write(&mut tcp_stream, &updates_range.len());
@@ -96,8 +97,7 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
         }
     }
 
-    for (_, &progcaster) in progcasters.iter() {
-        let mut progcaster = progcaster.lock().ok().expect("mutex error");
+    for (_, progcaster) in progcasters.iter() {
         progcaster.stop_recording();
     }
 
@@ -115,7 +115,8 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
     // serve target worker requests for ProgUpdate message ranges
 }
 
-pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>>) {
+/// TODO(lorenzo) doc
+pub fn bootstrap_worker_client(source_address: String, progcasters: HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>) {
 
     // receive `state`
     let mut tcp_stream = await_connection(source_address);
@@ -138,7 +139,7 @@ pub fn bootstrap_worker_client(source_address: String, mut progcasters: Arc<Hash
     }
 
     for (channel_id, encoded_state) in states.into_iter() {
-        let mut progcaster = progcasters[&channel_id].lock().ok().expect("mutex error");
+        let progcaster = progcasters[&channel_id].lock().ok().expect("mutex error");
         progcaster.set_progress_state(encoded_state);
 
         let missing_ranges = progcaster.get_missing_updates_ranges();

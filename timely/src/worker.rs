@@ -190,8 +190,8 @@ impl<A: Allocate> Worker<A> {
         {   // Process channel events. Activate responders.
             let mut allocator = self.allocator.borrow_mut();
             // If a new worker joined the cluster, back-fill all allocated channels (nop otherwise)
-            // TODO(lorenzo) create handles
-            // allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, self.progcaster_server_handles));
+            let handles = self.progcaster_server_handles.clone();
+            allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, handles));
             allocator.receive();
             let events = allocator.events().clone();
             let mut borrow = events.borrow_mut();
@@ -473,8 +473,6 @@ use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle}
 
 impl<A: Allocate> Clone for Worker<A> {
     fn clone(&self) -> Self {
-        let progcaster_server_handles = self.progcaster_server_handles.iter().map(|(id, handle)| (*id, handle.boxed_clone())).collect();
-        let progcaster_client_handles = self.progcaster_client_handles.iter().map(|(id, handle)| (*id, handle.boxed_clone())).collect();
         Worker {
             timer: self.timer,
             paths: self.paths.clone(),
@@ -485,8 +483,8 @@ impl<A: Allocate> Clone for Worker<A> {
             logging: self.logging.clone(),
             activations: self.activations.clone(),
             active_dataflows: Vec::new(),
-            progcaster_server_handles,
-            progcaster_client_handles,
+            progcaster_server_handles: self.progcaster_server_handles.clone(),
+            progcaster_client_handles: self.progcaster_client_handles.clone(),
             temp_channel_ids: self.temp_channel_ids.clone(),
         }
     }

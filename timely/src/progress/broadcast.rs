@@ -33,7 +33,7 @@ impl<T: Timestamp> ProgressState<T> {
     }
 
     // TODO(lorenzo) after a rescaling operation is complete, we should track also the new worker in the state
-    fn new_worker(&mut self, worker_index: usize) {
+    fn new_worker(&mut self, _worker_index: usize) {
         unimplemented!();
     }
 }
@@ -203,6 +203,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
         }
     }
 
+    /// Get the channel identifier of the progcaster, unique among all of other progcasters.
     pub fn channel_id(&self) -> usize {
         self.channel_identifier
     }
@@ -304,30 +305,62 @@ impl<T:Timestamp+Send> Progcaster<T> {
     }
 }
 
+/// Handle to progcaster struct to be used for bootstrapping a new worker.
+/// It exposes methods used on the server side (i.e. the worker already
+/// in the cluster that should bootstrap the new worker).
 pub trait ProgcasterServerHandle {
 
+    /// Start recording progress update messages, so that we can answer update_ranges queries.
     fn start_recording(&self);
 
+    /// Stop recording progress update messages.
     fn stop_recording(&self);
 
+    /// Get the encoded (abomonation::encode) progress state.
     fn get_progress_state(&self) -> Vec<u8>;
 
+    /// Return the encoded (abomonation::encode) vector of updates corresponding
+    /// to all updates in the requested message range range.
     fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8>;
 
+    /// Return a boxed clone of this handle.
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle>;
 }
 
+impl Clone for Box<ProgcasterServerHandle> {
+    fn clone(&self) -> Self {
+        self.boxed_clone()
+    }
+}
+
+/// Handle to progcaster struct to be used for bootstrapping a new worker.
+/// It exposes methods used on the client side (i.e. the new worker being bootstrapped).
 pub trait ProgcasterClientHandle {
 
+    /// Set the encoded progress state of the progcaster
     fn set_progress_state(&self, state: Vec<u8>);
 
+    /// Apply all updated provided in the encoded (abomonation::encode) vector of updates
     fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>);
 
+    /// Return a list of missing range requests. These requests, when combined to the accumulated
+    /// state of the progcaster, would provide all the progress messages that need to be received
+    /// to complete the initialization of the progcaster.
     fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange>;
 
+    /// To figure out the missing updates, we pulled from the channel and stashed
+    /// away progress messages. These messages should be applied to the state to
+    /// complete the initialization.
     fn apply_stashed_progress_msgs(&self);
 
+    /// Return a boxed clone of this handle.
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle>;
+}
+
+impl Clone for Box<ProgcasterClientHandle> {
+    fn clone(&self) -> Self {
+        self.boxed_clone()
+    }
 }
 
 
@@ -374,6 +407,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
     fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange> {
 
         let mut progcaster = self.lock().ok().expect("mutex error");
+        let progcaster = &mut *progcaster;
 
         let mut worker_todo: HashSet<usize> = progcaster.progress_state.worker_seqno.keys().map(|x| *x).collect();
 
@@ -427,7 +461,12 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
 
     fn apply_stashed_progress_msgs(&self) {
         let mut progcaster = self.lock().ok().expect("mutex error");
-        progcaster.progress_msg_stash.iter().for_each(|message| progcaster.progress_state.update(message));
+        let progcaster = &mut *progcaster;
+
+        for message in progcaster.progress_msg_stash.iter() {
+            progcaster.progress_state.update(message);
+        }
+
         progcaster.progress_msg_stash.clear();
     }
 

@@ -518,7 +518,7 @@ where
                 )
         };
 
-        let progcaster = self.progcaster.lock().ok().expect("mutex error");
+        let mut progcaster = self.progcaster.lock().ok().expect("mutex error");
 
         if must_send {
             progcaster.send(&mut self.local_pointstamp);
@@ -572,6 +572,10 @@ where
             .iter_mut()
             .flat_map(|child| child.operator.as_mut())
             .for_each(|op| op.set_external_summary());
+    }
+
+    fn get_progcasters_handles(&self) -> (HashMap<usize, Box<dyn ProgcasterClientHandle>>, HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
+        (self.progcasters_client_handles.clone(), self.progcasters_server_handles.clone())
     }
 }
 
