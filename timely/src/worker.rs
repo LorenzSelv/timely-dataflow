@@ -473,6 +473,8 @@ use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle}
 
 impl<A: Allocate> Clone for Worker<A> {
     fn clone(&self) -> Self {
+        let progcaster_server_handles = self.progcaster_server_handles.iter().map(|(id, handle)| (*id, handle.boxed_clone())).collect();
+        let progcaster_client_handles = self.progcaster_client_handles.iter().map(|(id, handle)| (*id, handle.boxed_clone())).collect();
         Worker {
             timer: self.timer,
             paths: self.paths.clone(),
@@ -483,8 +485,8 @@ impl<A: Allocate> Clone for Worker<A> {
             logging: self.logging.clone(),
             activations: self.activations.clone(),
             active_dataflows: Vec::new(),
-            progcaster_server_handles: self.progcaster_server_handles.clone(),
-            progcaster_client_handles: self.progcaster_client_handles.clone(),
+            progcaster_server_handles,
+            progcaster_client_handles,
             temp_channel_ids: self.temp_channel_ids.clone(),
         }
     }

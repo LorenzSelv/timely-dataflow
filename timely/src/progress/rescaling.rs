@@ -96,7 +96,7 @@ pub fn bootstrap_worker_server(target_address: String, progcasters: Arc<HashMap<
         }
     }
 
-    for (&channel_id, &progcaster) in progcasters.iter() {
+    for (_, &progcaster) in progcasters.iter() {
         let mut progcaster = progcaster.lock().ok().expect("mutex error");
         progcaster.stop_recording();
     }

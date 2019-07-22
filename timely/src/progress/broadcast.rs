@@ -61,24 +61,24 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
 
         // make sure the message is the next message we expect to read
         assert_eq!(self.worker_seqno[&worker_index], seq_no);
-        self.worker_seqno[&worker_index] = seq_no + 1;
+        self.worker_seqno.insert(worker_index, seq_no + 1);
 
         // apply all updates in the message
-        for &(pointstamp, delta) in progress_vec.into_iter() {
-            self.change_batch.update(pointstamp, delta);
+        for (pointstamp, delta) in progress_vec.into_iter() {
+            self.change_batch.update(pointstamp.clone(), *delta);
         }
     }
 
     fn apply_updates_range(&mut self, range: ProgressUpdatesRange, mut buf: Vec<u8>) {
         // make sure we are applying the correct range and update the next sequence number
         assert_eq!(self.worker_seqno[&range.worker_index], range.seq_no_start);
-        self.worker_seqno[&range.worker_index] = range.seq_no_end;
+        self.worker_seqno.insert(range.worker_index, range.seq_no_end);
 
         let (updates_range, remaining) = unsafe { abomonation::decode::<ProgressVec<T>>(&mut buf[..]) }.expect("decode error");
         assert_eq!(remaining.len(), 0);
 
-        for &(pointstamp, delta) in updates_range.into_iter() {
-            self.change_batch.update(pointstamp, delta);
+        for (pointstamp, delta) in updates_range.into_iter() {
+            self.change_batch.update(pointstamp.clone(), *delta);
         }
     }
 }
@@ -116,17 +116,13 @@ impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
         assert!(skip + range_size <= msgs.len());
 
-        let updates_range =
-            msgs
-                .into_iter()
-                .skip(skip)
-                .take(range_size)
-                .map(|msg| msg.2)
-                .flatten(); // each message has a ProgressVec
-
-
         let mut change_batch = ChangeBatch::new();
-        change_batch.extend(updates_range);
+
+        for progress_msg in msgs.into_iter().skip(skip).take(range_size) {
+            for (pointstamp, delta) in &progress_msg.2 {
+                change_batch.update(pointstamp.clone(), *delta);
+            }
+        }
 
         let acc = change_batch.into_inner();
 
@@ -144,7 +140,10 @@ pub type ProgressMsg<T> = Message<(usize, usize, ProgressVec<T>)>;
 
 /// Manages broadcasting of progress updates to and receiving updates from workers.
 pub struct Progcaster<T:Timestamp> {
+    // reuse allocations
     to_push: Option<ProgressMsg<T>>,
+    to_progress_state: Option<ProgressMsg<T>>,
+
     pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>, // TODO: this will become and hashmap, and we get the IDs from there
     puller: Box<Pull<ProgressMsg<T>>>,
     /// Source worker index
@@ -190,6 +189,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
         let addr = path.clone();
         Progcaster {
             to_push: None,
+            to_progress_state: None,
             pushers: pushers2,
             puller,
             source: worker_index,
@@ -208,11 +208,9 @@ impl<T:Timestamp+Send> Progcaster<T> {
     }
 
     /// Sends pointstamp changes to all workers.
-    pub fn send(&mut self, changes: &mut ChangeBatch<(Location, T)>) {
-
+    pub fn send(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
         changes.compact();
         if !changes.is_empty() {
-
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
                 is_send: true,
                 source: self.source,
@@ -224,31 +222,21 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 internal: Vec::new(),
             }));
 
+            // TODO(lorenzo) <======================================================
+            Progcaster::fill_message(&mut self.to_progress_state, self.source, self.counter, &mut changes);
+
+            if let Some(message) = &self.to_progress_state {
+                self.progress_state.update(message);
+            }
+
+            if let Some(ref mut recorder) = &mut self.recorder {
+                let tuple = (self.source, self.counter, changes.iter().cloned().collect());
+                recorder.append(Message::from_typed(tuple));
+            }
+
             for pusher in self.pushers.borrow_mut().iter_mut() {
 
-                // Attempt to re-use allocations, if possible.
-                if let Some(tuple) = &mut self.to_push {
-                    let tuple = tuple.as_mut();
-                    tuple.0 = self.source;
-                    tuple.1 = self.counter;
-                    tuple.2.clear(); tuple.2.extend(changes.iter().cloned());
-                }
-                // If we don't have an allocation ...
-                if self.to_push.is_none() {
-                    self.to_push = Some(Message::from_typed((
-                        self.source,
-                        self.counter,
-                        changes.clone().into_inner(),
-                    )));
-                }
-
-                if let Some(message) = &self.to_push {
-                    // let clone = *message.clone();
-                    self.progress_state.update(message);
-                    if let Some(mut recorder) = &self.recorder {
-                        recorder.append(*message.clone());
-                    }
-                }
+                Progcaster::fill_message(&mut self.to_push, self.source, self.counter, &mut changes);
 
                 // TODO: This should probably use a broadcast channel.
                 pusher.push(&mut self.to_push);
@@ -257,6 +245,24 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
             self.counter += 1;
             changes.clear();
+        }
+    }
+
+    fn fill_message(message: &mut Option<ProgressMsg<T>>, source: usize, counter: usize, changes: &mut ChangeBatch<(Location, T)>) {
+        // Attempt to re-use allocations, if possible.
+        if let Some(tuple) = message {
+            let tuple = tuple.as_mut();
+            tuple.0 = source;
+            tuple.1 = counter;
+            tuple.2.clear(); tuple.2.extend(changes.iter().cloned());
+        }
+        // If we don't have an allocation ...
+        if message.is_none() {
+            *message = Some(Message::from_typed((
+                source,
+                counter,
+                changes.clone().into_inner(),
+            )));
         }
     }
 
@@ -289,8 +295,9 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
             self.progress_state.update(&message);
 
-            if let Some(mut recorder) = &self.recorder {
-                recorder.append(*message); // TODO(lorenzo) do not deref here?
+            if let Some(ref mut recorder) = &mut self.recorder {
+                let tuple = (self.source, self.counter, recv_changes.iter().cloned().collect());
+                recorder.append(Message::from_typed(tuple));
             }
         }
 
@@ -306,6 +313,8 @@ pub trait ProgcasterServerHandle {
     fn get_progress_state(&self) -> Vec<u8>;
 
     fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8>;
+
+    fn boxed_clone(&self) -> Box<ProgcasterServerHandle>;
 }
 
 pub trait ProgcasterClientHandle {
@@ -317,44 +326,54 @@ pub trait ProgcasterClientHandle {
     fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange>;
 
     fn apply_stashed_progress_msgs(&self);
+
+    fn boxed_clone(&self) -> Box<ProgcasterClientHandle>;
 }
 
 
 impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
 
     fn start_recording(&self) {
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
         assert!(progcaster.recorder.is_none(), "TODO: handle concurrent rescaling operation?");
         progcaster.recorder = Some(ProgressRecorder::new());
     }
 
     fn stop_recording(&self) {
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
         assert!(progcaster.recorder.is_some());
         progcaster.recorder = None;
     }
 
     fn get_progress_state(&self) -> Vec<u8> {
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
         progcaster.progress_state.encode()
     }
 
     fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8> {
-        let progcaster = self.lock().ok().expect("mutex error");
-        progcaster.recorder.unwrap().get_updates_range(range)
+        let mut progcaster = self.lock().ok().expect("mutex error");
+        if let Some(recorder) = &mut progcaster.recorder {
+            recorder.get_updates_range(range)
+        } else {
+            panic!("asking for ranges but recorder is None");
+        }
+    }
+
+    fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {
+        Box::new(Arc::clone(&self))
     }
 }
 
 impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
 
     fn set_progress_state(&self, state: Vec<u8>) {
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
         progcaster.progress_state = ProgressState::decode(state);
     }
 
     fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange> {
 
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
 
         let mut worker_todo: HashSet<usize> = progcaster.progress_state.worker_seqno.keys().map(|x| *x).collect();
 
@@ -365,7 +384,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
             while let Some(message) = progcaster.puller.pull() {
                 let worker_index = message.0;
                 let msg_seq_no = message.1;
-                let progress_vec = &message.2;
+                let recv_changes = &message.2;
 
                 // state_seq_no is the next message that we should read and apply to the state
                 let state_seq_no = *progcaster.progress_state.worker_seqno.get(&worker_index).expect("msg from unknown worker");
@@ -373,7 +392,8 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
                 // if the message is not included in the state, we need to stash it
                 // so we can apply it later
                 if state_seq_no <= msg_seq_no {
-                    progcaster.progress_msg_stash.push(*message); // TODO(lorenzo) do not dereference here
+                    let tuple = (worker_index, msg_seq_no, recv_changes.iter().cloned().collect());
+                    progcaster.progress_msg_stash.push(Message::from_typed(tuple));
                 }
 
                 if worker_todo.contains(&worker_index) {
@@ -401,13 +421,17 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
     }
 
     fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
         progcaster.progress_state.apply_updates_range(range, updates_range)
     }
 
     fn apply_stashed_progress_msgs(&self) {
-        let progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.lock().ok().expect("mutex error");
         progcaster.progress_msg_stash.iter().for_each(|message| progcaster.progress_state.update(message));
         progcaster.progress_msg_stash.clear();
+    }
+
+    fn boxed_clone(&self) -> Box<ProgcasterClientHandle> {
+        Box::new(Arc::clone(&self))
     }
 }

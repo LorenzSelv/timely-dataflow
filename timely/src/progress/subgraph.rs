@@ -174,7 +174,7 @@ where
 
         // collect all progcasters wrapped by the children operator
         for child in self.children.iter() {
-            if let Some(operator) = child.operator {
+            if let Some(operator) = &child.operator {
                 let (client_handles, server_handles) = operator.get_progcasters_handles();
                 progcasters_client_handles.extend(client_handles);
                 progcasters_server_handles.extend(server_handles);
