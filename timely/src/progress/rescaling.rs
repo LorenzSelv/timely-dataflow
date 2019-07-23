@@ -98,7 +98,7 @@ pub fn bootstrap_worker_server(my_index: usize, target_address: SocketAddrV4, pr
 
             let progcaster = &progcasters[&range_req.channel_id];
 
-            let updates_range = progcaster.get_updates_range(range_req.clone());
+            let updates_range = progcaster.get_updates_range(range_req);
 
             // write the size of the encoded updates_range
             encode_write(&mut tcp_stream, &updates_range.len());

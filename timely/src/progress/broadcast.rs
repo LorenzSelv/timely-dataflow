@@ -110,7 +110,7 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
 
 impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
-    fn has_updates_range(&mut self, range: ProgressUpdatesRange) -> bool {
+    fn has_updates_range(&mut self, range: &ProgressUpdatesRange) -> bool {
         let msgs = &self.worker_msgs[&range.worker_index];
 
         if let Some(first_msg) = msgs.first() {
@@ -128,7 +128,7 @@ impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
         }
     }
 
-    fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8> {
+    fn get_updates_range(&mut self, range: &ProgressUpdatesRange) -> Vec<u8> {
 
         let msgs = self.worker_msgs.remove(&range.worker_index).expect("requested a range for missing worker index");
 
@@ -351,7 +351,7 @@ pub trait ProgcasterServerHandle {
 
     /// Return the encoded (abomonation::encode) vector of updates corresponding
     /// to all updates in the requested message range range.
-    fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8>;
+    fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Vec<u8>;
 
     /// Return a boxed clone of this handle.
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle>;
@@ -417,7 +417,7 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
         progcaster.progress_state.encode()
     }
 
-    fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8> {
+    fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Vec<u8> {
         let mut progcaster = self.lock().ok().expect("mutex error");
         let progcaster = &mut *progcaster;
 
@@ -426,14 +426,14 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
         // we might not have the requested range yet! If that's the case, we should
         // pull from the channel until we do (stashing changes for later).
         let mut changes_stash = ChangeBatch::new();
-        // TODO(lorenzo) do not clone
-        while !progcaster.recorder.has_updates_range(range.clone()) {
+        
+        while !progcaster.recorder.has_updates_range(range) {
             progcaster.pull_loop(&mut changes_stash);
         }
 
         progcaster.pulled_changes_stash.extend(changes_stash.drain());
 
-        progcaster.recorder.get_updates_range(range.clone())
+        progcaster.recorder.get_updates_range(range)
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {
