@@ -174,9 +174,11 @@ where
 
     let (allocators, other) = config.try_build()?;
 
+    let other = other.1;
+
     initialize_from(allocators, other, move |allocator| {
 
-        let mut worker = Worker::new(allocator);
+        let mut worker = Worker::new(allocator); // TODO , bootstrap_recv_endpoint);
 
         // If an environment variable is set, use it as the default timely logging.
         if let Ok(addr) = ::std::env::var("TIMELY_WORKER_LOG_ADDR") {

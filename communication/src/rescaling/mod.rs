@@ -1,4 +1,7 @@
 //! Rescaling of the computation, allowing new worker processes to setup connections to existing ones
+
+pub mod bootstrap;
+
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::Arc;
@@ -7,12 +10,13 @@ use crate::networking::recv_handshake;
 use crate::allocator::zero_copy::initialize::{LogSender, spawn_send_thread, spawn_recv_thread};
 use abomonation::Abomonation;
 use std::io::Read;
+use crate::rescaling::bootstrap::encode_write;
 
 /// Information to perform the rescaling
 pub struct RescaleMessage {
-    /// to share a TODO merge queue
+    /// to share a recv merge queue
     pub promise: Sender<MergeQueue>,
-    /// to share a TODO merge queue
+    /// to share a send merge queue
     pub future: Receiver<MergeQueue>,
     /// if Some, then the worker has been selected to bootstrap the new worker.
     /// It should connect to that address and init the new worker progress tracker.
@@ -42,7 +46,7 @@ pub fn rescaler(my_index: usize,
         let mut stream = listener.accept().expect("Accept failed").0;
         let new_worker_index = recv_handshake(&mut stream).expect("Handshake failed");
 
-        let bootstrap_addr = get_bootstrap_addr(&mut stream);
+        let bootstrap_addr = recv_bootstrap_addr(&mut stream, my_index);
 
         println!("worker {}:\tconnection from worker {}, bootstrap address is {:?}", my_index, new_worker_index, bootstrap_addr);
 
@@ -84,12 +88,19 @@ fn read_decode<T: Abomonation + Clone>(stream: &mut TcpStream) -> T {
     typed.clone()
 }
 
-fn get_bootstrap_addr(mut stream: &mut TcpStream) -> Option<SocketAddrV4> {
-
-    let selected: bool = read_decode(&mut stream);
+fn recv_bootstrap_addr(mut stream: &mut TcpStream, my_index: usize) -> Option<SocketAddrV4> {
+    let bootstrap_server_index: usize = read_decode(&mut stream);
     let ip: u32 = read_decode(&mut stream);
     let port: u16 = read_decode(&mut stream);
 
-    if selected { Some(SocketAddrV4::new(Ipv4Addr::from(ip), port)) }
+    // Some only if selected as bootstrap server
+    if bootstrap_server_index == my_index { Some(SocketAddrV4::new(Ipv4Addr::from(ip), port)) }
     else { None }
+}
+
+/// write bootstrap server index and bootstrap client address to tcp stream
+pub fn send_bootstrap_addr(mut stream: &mut TcpStream, bootstrap_server_index: usize, addr: SocketAddrV4) {
+    encode_write(&mut stream, &bootstrap_server_index);
+    encode_write(&mut stream, &u32::from(*addr.ip()));
+    encode_write(&mut stream, &addr.port());
 }

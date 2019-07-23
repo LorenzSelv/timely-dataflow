@@ -9,13 +9,16 @@ use std::collections::hash_map::Entry;
 
 use crate::communication::{Allocate, Data, Pull};
 use crate::communication::allocator::thread::{ThreadPusher, ThreadPuller};
+use crate::communication::allocator::OnNewPushFn;
+use crate::communication::Message;
 use crate::scheduling::{Schedule, Scheduler, Activations};
-use crate::progress::timestamp::{Refines};
+use crate::progress::timestamp::Refines;
 use crate::progress::SubgraphBuilder;
 use crate::progress::operate::Operate;
+use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
 use crate::dataflow::scopes::Child;
 use crate::logging::TimelyLogger;
-use timely_communication::allocator::OnNewPushFn;
+
 
 /// Methods provided by the root Worker.
 ///
@@ -472,9 +475,6 @@ impl<A: Allocate> Worker<A> {
         *self.dataflow_counter.borrow() - 1
     }
 }
-
-use crate::communication::Message;
-use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
 
 impl<A: Allocate> Clone for Worker<A> {
     fn clone(&self) -> Self {

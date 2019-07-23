@@ -239,7 +239,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     }
 
     /// When a new worker process joins the computation, it would initiate connection to every other process
-    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/rescaling.rs).
+    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/mod.rs).
     ///
     /// This function checks with the acceptor (or rescaler) thread if a worker process joined, and if that is case it would
     /// update allocator internal state and back-fill existing channels, by calling the `on_new_pusher`

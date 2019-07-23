@@ -68,7 +68,7 @@ pub trait Allocate {
     ///
     /// This function is implemented only by the `TcpAllocator` which allows the addition (and maybe removal?)
     /// of workers. When a new worker process joins the computation, it would initiate connection to every other process
-    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/rescaling.rs).
+    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/mod.rs).
     ///
     /// This function checks with the acceptor thread if a worker process joined, and if that is case it would
     /// update allocator internal state and back-fill existing channels, by calling the `on_new_pusher`

@@ -31,10 +31,11 @@ impl Drop for CommsGuard {
 
 use crate::logging::{CommunicationSetup, CommunicationEvent};
 use logging_core::Logger;
-use std::net::TcpStream;
+use std::net::{TcpStream, SocketAddrV4};
 use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::thread::JoinHandle;
+use crate::rescaling::send_bootstrap_addr;
 
 /// Returns a logger for communication events
 pub type LogSender = Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>;
@@ -44,6 +45,7 @@ pub fn initialize_networking(
     addresses: Vec<String>,
     my_index: usize,
     threads: usize,
+    bootstrap_info: Option<(usize, SocketAddrV4)>,
     noisy: bool,
     log_sender: LogSender)
 -> ::std::io::Result<(Vec<TcpBuilder<ProcessBuilder>>, CommsGuard)>
@@ -85,7 +87,14 @@ pub fn initialize_networking(
     // for each process, if a stream exists (i.e. not local) ...
     for index in 0..results.len() {
 
-        if let Some(stream) = results[index].take() {
+        if let Some(mut stream) = results[index].take() {
+
+            // if this new timely process is joinin the cluster, communicate the selected bootstrap server
+            // to all other worker processes before spawning send/recv threads.
+            if let Some((bootstrap_server_index, bootstrap_addr)) = bootstrap_info {
+                send_bootstrap_addr(&mut stream, bootstrap_server_index, bootstrap_addr);
+            }
+
             let remote_recv = promises_iter.next().unwrap();
             let send_guard = spawn_send_thread(my_index, index, stream.try_clone()?, log_sender.clone(), remote_recv)?;
             send_guards.push(send_guard);

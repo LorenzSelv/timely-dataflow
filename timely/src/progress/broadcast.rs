@@ -6,7 +6,7 @@ use crate::communication::{Message, Push, Pull};
 use crate::logging::TimelyLogger as Logger;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::progress::rescaling::ProgressUpdatesRange;
+use crate::communication::rescaling::bootstrap::ProgressUpdatesRange;
 use std::collections::{HashMap, HashSet};
 use abomonation::Abomonation;
 use std::sync::{Arc, Mutex};

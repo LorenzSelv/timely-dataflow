@@ -8,6 +8,7 @@ use getopts;
 use std::sync::Arc;
 
 use std::any::Any;
+use std::str::FromStr;
 
 use crate::allocator::thread::ThreadBuilder;
 use crate::allocator::{AllocateBuilder, Process, Generic, GenericBuilder};
@@ -15,6 +16,8 @@ use crate::allocator::zero_copy::initialize::initialize_networking;
 
 use crate::logging::{CommunicationSetup, CommunicationEvent};
 use logging_core::Logger;
+use std::net::SocketAddrV4;
+use crate::rescaling::bootstrap::{BootstrapSendEndpoint, BootstrapRecvEndpoint, bootstrap_worker_client};
 
 
 /// Possible configurations for the communication infrastructure.
@@ -33,6 +36,8 @@ pub enum Configuration {
         addresses: Vec<String>,
         /// Verbosely report connection process
         report: bool,
+        /// Whether the current is joining the cluster
+        join: Option<usize>,
         /// Closure to create a new logger for a communication thread
         log_fn: Box<Fn(CommunicationSetup) -> Option<Logger<CommunicationEvent, CommunicationSetup>> + Send + Sync>,
     }
@@ -49,6 +54,7 @@ impl Configuration {
         opts.optopt("p", "process", "identity of this process", "IDX");
         opts.optopt("n", "processes", "number of processes", "NUM");
         opts.optopt("h", "hostfile", "text file whose lines are process addresses", "FILE");
+        opts.optopt("j", "join", "join the cluster with worker NUM as bootstrap server", "NUM");
         opts.optflag("r", "report", "reports connection progress");
 
         opts
@@ -68,6 +74,7 @@ impl Configuration {
             let threads = matches.opt_str("w").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
             let process = matches.opt_str("p").map(|x| x.parse().unwrap_or(0)).unwrap_or(0);
             let processes = matches.opt_str("n").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
+            let join = matches.opt_str("join").map(|x| x.parse::<usize>().unwrap());
             let report = matches.opt_present("report");
 
             assert!(process < processes);
@@ -95,7 +102,8 @@ impl Configuration {
                     process,
                     addresses,
                     report,
-                    log_fn: Box::new( | _ | None),
+                    join,
+                    log_fn: Box::new(|_| None),
                 }
             }
             else if threads > 1 { Configuration::Process(threads) }
@@ -104,18 +112,47 @@ impl Configuration {
     }
 
     /// Attempts to assemble the described communication infrastructure.
-    pub fn try_build(self) -> Result<(Vec<GenericBuilder>, Box<Any>), String> {
+    pub fn try_build(self) -> Result<(Vec<GenericBuilder>, (Option<Vec<BootstrapRecvEndpoint>>, Box<Any>)), String> {
         match self {
             Configuration::Thread => {
-                Ok((vec![GenericBuilder::Thread(ThreadBuilder)], Box::new(())))
+                Ok((vec![GenericBuilder::Thread(ThreadBuilder)], (None, Box::new(()))))
             },
             Configuration::Process(threads) => {
-                Ok((Process::new_vector(threads).into_iter().map(|x| GenericBuilder::Process(x)).collect(), Box::new(())))
+                Ok((Process::new_vector(threads).into_iter().map(|x| GenericBuilder::Process(x)).collect(), (None, Box::new(()))))
             },
-            Configuration::Cluster { threads, process, addresses, report, log_fn } => {
-                match initialize_networking(addresses, process, threads, report, log_fn) {
+            Configuration::Cluster { threads, process, addresses, report, join, log_fn } => {
+
+                let (bootstrap_info, bootstrap_recv_endpoints) =
+                    if let Some(server_index) = join {
+                        let (sends, recvs) =
+                            (0..threads).map(|_| {
+                                let (state_tx, state_rx) = std::sync::mpsc::channel();
+                                let (range_req_tx, range_req_rx) = std::sync::mpsc::channel();
+                                let (range_ans_tx, range_ans_rx) = std::sync::mpsc::channel();
+
+                                let send = BootstrapSendEndpoint::new(state_tx, range_req_rx, range_ans_tx);
+                                let recv = BootstrapRecvEndpoint::new(state_rx, range_req_tx, range_ans_rx);
+                                (send, recv)
+                            }).unzip();
+
+                        let bootstrap_address = std::env::var("BOOTSTRAP_ADDR").unwrap_or("localhost:9000".to_string());
+                        let bootstrap_address = SocketAddrV4::from_str(bootstrap_address.as_str()).expect("cannot parse BOOTSTRAP_ADDRESS");
+
+                        let bootstrap_info = Some((server_index, bootstrap_address));
+
+                        // spawn the bootstrap thread, passing bootstrap endpoints (one for every worker thread to bootstrap)
+                        std::thread::spawn(move || bootstrap_worker_client(bootstrap_address, sends));
+
+                        (bootstrap_info, Some(recvs))
+                    } else {
+                        (None, None)
+                    };
+
+
+                match initialize_networking(addresses, process, threads, bootstrap_info, report, log_fn) {
                     Ok((stuff, guard)) => {
-                        Ok((stuff.into_iter().map(|x| GenericBuilder::ZeroCopy(x)).collect(), Box::new(guard)))
+                        let builders = stuff.into_iter().map(|x| GenericBuilder::ZeroCopy(x)).collect();
+                        Ok((builders, (bootstrap_recv_endpoints, Box::new(guard))))
                     },
                     Err(err) => Err(format!("failed to initialize networking: {}", err))
                 }
@@ -207,6 +244,8 @@ pub fn initialize<T:Send+'static, F: Fn(Generic)->T+Send+Sync+'static>(
     func: F,
 ) -> Result<WorkerGuards<T>,String> {
     let (allocators, others) = config.try_build()?;
+    assert!(others.0.is_none());
+    let others = others.1;
     initialize_from(allocators, others, func)
 }
 
