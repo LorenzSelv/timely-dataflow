@@ -21,10 +21,10 @@ pub struct ProgressUpdatesRange {
     pub channel_id: usize,
     /// index of the worker
     pub worker_index: usize,
-    /// inclusive start of the range seq_no_start..seq_no_end
-    pub seq_no_start: usize,
+    /// inclusive start of the range start_seqno..end_seqno
+    pub start_seqno: usize,
     /// exclusive end of the range seq_no_start..seq_no_end
-    pub seq_no_end: usize,
+    pub end_seqno: usize,
 }
 
 fn read_decode<T: Abomonation + Copy>(stream: &mut TcpStream) -> T {
@@ -43,7 +43,6 @@ fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
 }
 
 /// TODO documentation
-/// TODO Arc<Vec<Mutex ?
 pub fn bootstrap_worker_server(target_address: SocketAddrV4, progcasters: HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
 
     // connect to target_address
@@ -76,6 +75,8 @@ pub fn bootstrap_worker_server(target_address: SocketAddrV4, progcasters: HashMa
     loop {
         let read = tcp_stream.read(&mut request_buf[..]).expect("read error");
 
+        // loop until the client closes the connection
+        // TODO maybe send some close message instead
         if read == 0 {
             println!("bootstrap worker server done!");
             break;
@@ -100,25 +101,12 @@ pub fn bootstrap_worker_server(target_address: SocketAddrV4, progcasters: HashMa
     for (_, progcaster) in progcasters.iter() {
         progcaster.stop_recording();
     }
-
-    // TODO need some handles to progcasters.
-    //   Requirements:
-    //     * get abomonated "scope_state" & start recording
-    //     * get abomonated "change batch of a progress update seqNo range"
-    //     * stop recording
-
-    // send `state`
-    // `state`: hashmap scope_id => `scope_state<Timestamp>`
-    // `scope_state`: pair (compacted change batch, `meta`)
-    // `meta`: hashmap worker_index => last seq_no included in the compacted change batch
-
-    // serve target worker requests for ProgUpdate message ranges
 }
 
 /// TODO(lorenzo) doc
 pub fn bootstrap_worker_client(source_address: String, progcasters: HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>) {
 
-    // receive `state`
+    // wait for the server to initiate the connection
     let mut tcp_stream = await_connection(source_address);
 
     let mut states = Vec::with_capacity(progcasters.len());
@@ -159,15 +147,4 @@ pub fn bootstrap_worker_client(source_address: String, progcasters: HashMap<usiz
             progcaster.apply_updates_range(range, updates_range_buf);
         }
     }
-
-    // TODO need some handles to progcasters.
-    //   Requirements:
-    //     * set abomonated "scope_state"
-    //     * get range requests
-    //     * apply abomonated "change batch of a progress update seqNo range"
-
-    // look at pullers for progress tracking channel
-    // look at the sequence numbers in the channel and figure out which
-    // messages should be discarded (if already present in the compacted state) or requested (if missing)
-    // ask the bootstrap_server for the missing tuples
 }

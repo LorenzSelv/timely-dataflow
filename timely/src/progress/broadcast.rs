@@ -71,8 +71,8 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
 
     fn apply_updates_range(&mut self, range: ProgressUpdatesRange, mut buf: Vec<u8>) {
         // make sure we are applying the correct range and update the next sequence number
-        assert_eq!(self.worker_seqno[&range.worker_index], range.seq_no_start);
-        self.worker_seqno.insert(range.worker_index, range.seq_no_end);
+        assert_eq!(self.worker_seqno[&range.worker_index], range.start_seqno);
+        self.worker_seqno.insert(range.worker_index, range.end_seqno);
 
         let (updates_range, remaining) = unsafe { abomonation::decode::<ProgressVec<T>>(&mut buf[..]) }.expect("decode error");
         assert_eq!(remaining.len(), 0);
@@ -106,13 +106,31 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
 
 impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
+    fn has_updates_range(&mut self, range: ProgressUpdatesRange) -> bool {
+        let msgs = &self.worker_msgs[&range.worker_index];
+
+        if let Some(first_msg) = msgs.first() {
+
+            let last_msg = msgs.last().unwrap();
+
+            let first_seqno = first_msg.1;
+            let last_seqno = last_msg.1;
+
+            // `range.end_seqno` is exclusive: the new worker will read that message
+            // from the direct connection with the other worker.
+            first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno
+        } else {
+            false
+        }
+    }
+
     fn get_updates_range(&mut self, range: ProgressUpdatesRange) -> Vec<u8> {
 
         let msgs = self.worker_msgs.remove(&range.worker_index).expect("requested a range for missing worker index");
 
-        let seq_no_first = msgs[0].1;
-        let skip = range.seq_no_start - seq_no_first;
-        let range_size = range.seq_no_end - range.seq_no_start;
+        let first_seqno = msgs[0].1;
+        let skip = range.start_seqno - first_seqno;
+        let range_size = range.end_seqno - range.start_seqno;
 
         assert!(skip + range_size <= msgs.len());
 
@@ -163,6 +181,8 @@ pub struct Progcaster<T:Timestamp> {
 
     recorder: Option<ProgressRecorder<T>>,
 
+    pulled_changes_stash: ChangeBatch<(Location, T)>,
+
     logging: Option<Logger>,
 }
 
@@ -199,6 +219,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
             logging,
             progress_state: ProgressState::new(),
             progress_msg_stash: Vec::new(),
+            pulled_changes_stash: ChangeBatch::new(),
             recorder: None, // not recording initially
         }
     }
@@ -267,8 +288,15 @@ impl<T:Timestamp+Send> Progcaster<T> {
     }
 
     /// Receives pointstamp changes from all workers.
-    pub fn recv(&mut self, changes: &mut ChangeBatch<(Location, T)>) {
+    pub fn recv(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
+        // First drain all stashed changes that we already pulled, but not exposed yet.
+        changes.extend(self.pulled_changes_stash.drain());
 
+        // Then try to pull more changes from the channel.
+        self.pull_loop(&mut changes);
+    }
+
+    fn pull_loop(&mut self, changes: &mut ChangeBatch<(Location, T)>) {
         while let Some(message) = self.puller.pull() {
 
             let source = message.0;
@@ -383,18 +411,28 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
 
     fn get_updates_range(&self, range: ProgressUpdatesRange) -> Vec<u8> {
         let mut progcaster = self.lock().ok().expect("mutex error");
+        let progcaster = &mut *progcaster;
+
+        if progcaster.recorder.is_none() {
+            panic!("get_update_ranges but recorder is None");
+        }
+
+        // we might not have the requested range yet! If that's the case, we should
+        // pull from the channel until we do (stashing changes for later).
+        let mut changes_stash = ChangeBatch::new();
+        loop {
+            if let Some(recorder) = &mut progcaster.recorder {
+                if recorder.has_updates_range(range.clone()) { break }
+            }
+
+            progcaster.pull_loop(&mut changes_stash);
+        }
+
+        progcaster.pulled_changes_stash.extend(changes_stash.drain());
 
         if let Some(recorder) = &mut progcaster.recorder {
-            // TODO(lorenzo) we might not have the requested range yet! If that's the case, we should
-            //               pull from the channel until we do.
-//            while !recorder.has_update_range() {
-//                progcaster.do_something();
-//            }
-
-            recorder.get_updates_range(range)
-        } else {
-            panic!("asking for ranges but recorder is None");
-        }
+            recorder.get_updates_range(range.clone())
+        } else { panic!("") }
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {
@@ -444,8 +482,8 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
                         let missing_range = ProgressUpdatesRange {
                             channel_id: progcaster.channel_identifier,
                             worker_index,
-                            seq_no_start: state_seq_no,
-                            seq_no_end: msg_seq_no,
+                            start_seqno: state_seq_no,
+                            end_seqno: msg_seq_no,
                         };
                         missing_ranges.push(missing_range);
                     }
