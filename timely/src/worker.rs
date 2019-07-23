@@ -189,10 +189,15 @@ impl<A: Allocate> Worker<A> {
 
         {   // Process channel events. Activate responders.
             let mut allocator = self.allocator.borrow_mut();
-            // If a new worker joined the cluster, back-fill all allocated channels (nop otherwise)
+
+            // If a new worker joined the cluster, back-fill all allocated channels.
+            // Also, if we were selected for bootstrapping the new worker's progress tracker,
+            // then the bootstrap_worker_server closure will be invoked.
             let handles = self.progcaster_server_handles.clone();
             allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, handles));
+
             allocator.receive();
+
             let events = allocator.events().clone();
             let mut borrow = events.borrow_mut();
             let paths = self.paths.borrow();
