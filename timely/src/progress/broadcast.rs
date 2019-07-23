@@ -396,37 +396,36 @@ impl Clone for Box<ProgcasterClientHandle> {
 }
 
 
-impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
+impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
 
     fn start_recording(&self) {
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         assert!(!progcaster.is_recording, "TODO: handle concurrent rescaling operation?");
         progcaster.is_recording = true;
         progcaster.recorder.reset();
     }
 
     fn stop_recording(&self) {
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         assert!(progcaster.is_recording);
         progcaster.is_recording = false;
         progcaster.recorder.reset();
     }
 
     fn get_progress_state(&self) -> Vec<u8> {
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         progcaster.progress_state.encode()
     }
 
     fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Vec<u8> {
-        let mut progcaster = self.lock().ok().expect("mutex error");
-        let progcaster = &mut *progcaster;
+        let mut progcaster = self.borrow_mut();
 
         assert!(progcaster.is_recording);
 
         // we might not have the requested range yet! If that's the case, we should
         // pull from the channel until we do (stashing changes for later).
         let mut changes_stash = ChangeBatch::new();
-        
+
         while !progcaster.recorder.has_updates_range(range) {
             progcaster.pull_loop(&mut changes_stash);
         }
@@ -437,7 +436,7 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {
-        Box::new(Arc::clone(&self))
+        Box::new(Rc::clone(&self))
     }
 }
 
