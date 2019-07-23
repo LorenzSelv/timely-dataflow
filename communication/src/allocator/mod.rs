@@ -47,8 +47,8 @@ pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
 impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
 /// TODO(lorenzo) doc
-pub trait BootstrapClosure : FnOnce(SocketAddrV4) + 'static {}
-impl <F: FnOnce(SocketAddrV4) + 'static> BootstrapClosure for F {}
+pub trait BootstrapClosure : FnOnce(usize, SocketAddrV4) + 'static {}
+impl <F: FnOnce(usize, SocketAddrV4) + 'static> BootstrapClosure for F {}
 
 
 /// A type capable of allocating channels.

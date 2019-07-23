@@ -1,17 +1,34 @@
 //! TODO
-use std::net::{TcpStream, SocketAddrV4};
+use std::net::{TcpStream, SocketAddrV4, TcpListener};
 use abomonation::Abomonation;
 use std::io::{Read, Write};
 use std::sync::Mutex;
 use std::collections::HashMap;
 use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
+use timely_communication::networking::{send_handshake, recv_handshake};
 
-fn start_connection(_address: SocketAddrV4) -> TcpStream {
-    unimplemented!()
+fn start_connection(my_index: usize, address: SocketAddrV4) -> TcpStream {
+    loop {
+        match TcpStream::connect(address) {
+            Ok(mut stream) => {
+                send_handshake(&mut stream, my_index);
+                println!("[bootstrap server -- W{}] connected to new worker at {}", my_index, address);
+                break stream
+            },
+            Err(error) => {
+                println!("[bootstap server -- W{}] error connecting to new worker at {}: {}", my_index, address, error);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            },
+        }
+    }
 }
 
-fn await_connection(_address: String) -> TcpStream {
-    unimplemented!()
+fn await_connection(address: SocketAddrV4) -> TcpStream {
+    let listener = TcpListener::bind(address).expect("bind error");
+    let mut stream = listener.accept().expect("accept error").0;
+    let identifier = recv_handshake(&mut stream).expect("recv handshake error");
+    println!("[bootstrap client] connected to worker {}", identifier);
+    stream
 }
 
 /// Identifies a range of progress updates
@@ -43,10 +60,10 @@ fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
 }
 
 /// TODO documentation
-pub fn bootstrap_worker_server(target_address: SocketAddrV4, progcasters: HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
+pub fn bootstrap_worker_server(my_index: usize, target_address: SocketAddrV4, progcasters: HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
 
     // connect to target_address
-    let mut tcp_stream = start_connection(target_address);
+    let mut tcp_stream = start_connection(my_index, target_address);
 
     let mut states = Vec::with_capacity(progcasters.len());
 
@@ -104,7 +121,7 @@ pub fn bootstrap_worker_server(target_address: SocketAddrV4, progcasters: HashMa
 }
 
 /// TODO(lorenzo) doc
-pub fn bootstrap_worker_client(source_address: String, progcasters: HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>) {
+pub fn bootstrap_worker_client(source_address: SocketAddrV4, progcasters: HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>) {
 
     // wait for the server to initiate the connection
     let mut tcp_stream = await_connection(source_address);

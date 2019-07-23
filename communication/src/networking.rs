@@ -88,9 +88,7 @@ pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bo
         loop {
             match TcpStream::connect(address) {
                 Ok(mut stream) => {
-                    stream.set_nodelay(true).expect("set_nodelay call failed");
-                    unsafe { encode(&HANDSHAKE_MAGIC, &mut stream) }.expect("failed to encode/send handshake magic");
-                    unsafe { encode(&(my_index as u64), &mut stream) }.expect("failed to encode/send worker index");
+                    send_handshake(&mut stream, my_index);
                     if noisy { println!("worker {}:\tconnection to worker {}", my_index, index); }
                     break Some(stream);
                 },
@@ -103,6 +101,13 @@ pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bo
     }).collect();
 
     Ok(results)
+}
+
+/// Perform sender handshake protocol
+pub fn send_handshake(mut stream: &mut TcpStream, my_index: usize) {
+    stream.set_nodelay(true).expect("set_nodelay call failed");
+    unsafe { encode(&HANDSHAKE_MAGIC, &mut stream) }.expect("failed to encode/send handshake magic");
+    unsafe { encode(&(my_index as u64), &mut stream) }.expect("failed to encode/send worker index");
 }
 
 /// Result contains connections [my_index + 1, addresses.len() - 1].

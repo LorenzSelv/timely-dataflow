@@ -272,7 +272,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                 // cannot send some of the progcaster members (Rc stuff) to other thread safely,
                 // need to call the closure directly
                 // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
-                bootstrap_closure(addr);
+                bootstrap_closure(self.index, addr);
             }
 
             // back-fill existing channels with `threads` new pushers pointing to the new send

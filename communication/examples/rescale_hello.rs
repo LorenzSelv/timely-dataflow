@@ -58,7 +58,7 @@ fn main() {
             std::thread::sleep(Duration::from_secs(2));
 
             // TODO(lorenzo) example is probably broken now
-            allocator.rescale(|_| {});
+            allocator.rescale(|_,_| {});
 
             let mut senders = senders2.borrow_mut();
 

@@ -194,7 +194,7 @@ impl<A: Allocate> Worker<A> {
             // Also, if we were selected for bootstrapping the new worker's progress tracker,
             // then the bootstrap_worker_server closure will be invoked.
             let handles = self.progcaster_server_handles.clone();
-            allocator.rescale(|addr| crate::progress::rescaling::bootstrap_worker_server(addr, handles));
+            allocator.rescale(|my_index, addr| crate::progress::rescaling::bootstrap_worker_server(my_index, addr, handles));
 
             allocator.receive();
 
