@@ -94,6 +94,10 @@ impl<T: Timestamp> ProgressRecorder<T> {
         }
     }
 
+    fn reset(&mut self) {
+        self.worker_msgs.clear();
+    }
+
     fn append(&mut self, progress_msg: ProgressMsg<T>) {
         self.worker_msgs
             .entry(progress_msg.0)
@@ -179,7 +183,8 @@ pub struct Progcaster<T:Timestamp> {
     // where we stash messages that we should apply to the progress state after initialization
     progress_msg_stash: Vec<ProgressMsg<T>>,
 
-    recorder: Option<ProgressRecorder<T>>,
+    recorder: ProgressRecorder<T>,
+    is_recording: bool,
 
     pulled_changes_stash: ChangeBatch<(Location, T)>,
 
@@ -220,7 +225,8 @@ impl<T:Timestamp+Send> Progcaster<T> {
             progress_state: ProgressState::new(),
             progress_msg_stash: Vec::new(),
             pulled_changes_stash: ChangeBatch::new(),
-            recorder: None, // not recording initially
+            recorder: ProgressRecorder::new(),
+            is_recording: false, // not recording initially
         }
     }
 
@@ -231,6 +237,9 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
     /// Sends pointstamp changes to all workers.
     pub fn send(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
+
+        assert!(!self.is_recording, "don't send during rescaling operations");
+
         changes.compact();
         if !changes.is_empty() {
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
@@ -248,11 +257,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
             if let Some(message) = &self.to_progress_state {
                 self.progress_state.update(message);
-            }
-
-            if let Some(ref mut recorder) = &mut self.recorder {
-                let tuple = (self.source, self.counter, changes.iter().cloned().collect());
-                recorder.append(Message::from_typed(tuple));
             }
 
             for pusher in self.pushers.borrow_mut().iter_mut() {
@@ -323,9 +327,9 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
             self.progress_state.update(&message);
 
-            if let Some(ref mut recorder) = &mut self.recorder {
+            if self.is_recording {
                 let tuple = (self.source, self.counter, recv_changes.iter().cloned().collect());
-                recorder.append(Message::from_typed(tuple));
+                self.recorder.append(Message::from_typed(tuple));
             }
         }
     }
@@ -372,7 +376,9 @@ pub trait ProgcasterClientHandle {
     /// Return a list of missing range requests. These requests, when combined to the accumulated
     /// state of the progcaster, would provide all the progress messages that need to be received
     /// to complete the initialization of the progcaster.
-    fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange>;
+    /// `exclude_id` is the id of the worker acting as the bootstrap server. Since the
+    /// bootstrapping is done synchronously, the
+    fn get_missing_updates_ranges(&self, exclude_id: usize) -> Vec<ProgressUpdatesRange>;
 
     /// To figure out the missing updates, we pulled from the channel and stashed
     /// away progress messages. These messages should be applied to the state to
@@ -394,14 +400,16 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
 
     fn start_recording(&self) {
         let mut progcaster = self.lock().ok().expect("mutex error");
-        assert!(progcaster.recorder.is_none(), "TODO: handle concurrent rescaling operation?");
-        progcaster.recorder = Some(ProgressRecorder::new());
+        assert!(!progcaster.is_recording, "TODO: handle concurrent rescaling operation?");
+        progcaster.is_recording = true;
+        progcaster.recorder.reset();
     }
 
     fn stop_recording(&self) {
         let mut progcaster = self.lock().ok().expect("mutex error");
-        assert!(progcaster.recorder.is_some());
-        progcaster.recorder = None;
+        assert!(progcaster.is_recording);
+        progcaster.is_recording = false;
+        progcaster.recorder.reset();
     }
 
     fn get_progress_state(&self) -> Vec<u8> {
@@ -413,26 +421,19 @@ impl<T: Timestamp> ProgcasterServerHandle for Arc<Mutex<Progcaster<T>>> {
         let mut progcaster = self.lock().ok().expect("mutex error");
         let progcaster = &mut *progcaster;
 
-        if progcaster.recorder.is_none() {
-            panic!("get_update_ranges but recorder is None");
-        }
+        assert!(progcaster.is_recording);
 
         // we might not have the requested range yet! If that's the case, we should
         // pull from the channel until we do (stashing changes for later).
         let mut changes_stash = ChangeBatch::new();
-        loop {
-            if let Some(recorder) = &mut progcaster.recorder {
-                if recorder.has_updates_range(range.clone()) { break }
-            }
-
+        // TODO(lorenzo) do not clone
+        while !progcaster.recorder.has_updates_range(range.clone()) {
             progcaster.pull_loop(&mut changes_stash);
         }
 
         progcaster.pulled_changes_stash.extend(changes_stash.drain());
 
-        if let Some(recorder) = &mut progcaster.recorder {
-            recorder.get_updates_range(range.clone())
-        } else { panic!("") }
+        progcaster.recorder.get_updates_range(range.clone())
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {
@@ -447,12 +448,18 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
         progcaster.progress_state = ProgressState::decode(state);
     }
 
-    fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange> {
+    fn get_missing_updates_ranges(&self, server_index: usize) -> Vec<ProgressUpdatesRange> {
 
         let mut progcaster = self.lock().ok().expect("mutex error");
         let progcaster = &mut *progcaster;
 
         let mut worker_todo: HashSet<usize> = progcaster.progress_state.worker_seqno.keys().map(|x| *x).collect();
+
+        // The server worker will not push any progress message until bootstrapping is completed.
+        // When the worker will start reading from its direct connection with the server worker,
+        // it will find the next seqno after the one that appears in the state.
+        // Thus there will be no missing range with the server worker, we can remove it from the list.
+        worker_todo.remove(&server_index);
 
         let mut missing_ranges = Vec::new();
 

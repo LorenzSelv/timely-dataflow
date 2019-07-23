@@ -253,6 +253,16 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
             let RescaleMessage { promise, future, bootstrap_addr } = rescale_message;
 
+            if let Some(addr) = bootstrap_addr {
+                // This worker was selected to bootstrap the progress tracker of the new worker,
+                // spawn the bootstrap thread
+
+                // cannot send some of the progcaster members (Rc stuff) to other thread safely,
+                // need to call the closure directly
+                // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
+                bootstrap_closure(self.index, addr);
+            }
+
             // A new process joined. The rescaler thread spawned a new pair of network thread
             // for sending/receiving from this new worker process. We need to setup shared `MergeQueue`
             // with those threads. The protocol is the same as the initialization code.
@@ -263,17 +273,6 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             // update recvs and sends
             self.sends.push(new_send.clone());
             self.recvs.push(new_recv);
-
-
-            if let Some(addr) = bootstrap_addr {
-                // We were selected to bootstrap the progress tracker of the new worker,
-                // spawn the bootstrap thread
-
-                // cannot send some of the progcaster members (Rc stuff) to other thread safely,
-                // need to call the closure directly
-                // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
-                bootstrap_closure(self.index, addr);
-            }
 
             // back-fill existing channels with `threads` new pushers pointing to the new send
             let threads = self.inner.peers();

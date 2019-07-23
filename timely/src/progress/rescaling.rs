@@ -65,19 +65,12 @@ pub fn bootstrap_worker_server(my_index: usize, target_address: SocketAddrV4, pr
     // connect to target_address
     let mut tcp_stream = start_connection(my_index, target_address);
 
-    let mut states = Vec::with_capacity(progcasters.len());
-
-    for (&channel_id, progcaster) in progcasters.iter() {
+    for (channel_id, progcaster) in progcasters.iter() {
         let progress_state = progcaster.get_progress_state();
         progcaster.start_recording();
 
-        states.push((channel_id, progress_state));
-    }
-
-
-    for (channel_id, progress_state) in states.into_iter() {
         // (1) write channel_id
-        encode_write(&mut tcp_stream, &channel_id);
+        encode_write(&mut tcp_stream, channel_id);
 
         // (2) write size of the state in bytes
         encode_write(&mut tcp_stream, &progress_state.len());
@@ -121,7 +114,7 @@ pub fn bootstrap_worker_server(my_index: usize, target_address: SocketAddrV4, pr
 }
 
 /// TODO(lorenzo) doc
-pub fn bootstrap_worker_client(source_address: SocketAddrV4, progcasters: HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>) {
+pub fn bootstrap_worker_client(server_index: usize, source_address: SocketAddrV4, progcasters: HashMap<usize, Mutex<Box<dyn ProgcasterClientHandle>>>) {
 
     // wait for the server to initiate the connection
     let mut tcp_stream = await_connection(source_address);
@@ -147,7 +140,7 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, progcasters: HashMa
         let progcaster = progcasters[&channel_id].lock().ok().expect("mutex error");
         progcaster.set_progress_state(encoded_state);
 
-        let missing_ranges = progcaster.get_missing_updates_ranges();
+        let missing_ranges = progcaster.get_missing_updates_ranges(server_index);
 
         for range in missing_ranges.into_iter() {
 
