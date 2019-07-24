@@ -21,11 +21,14 @@ fn main() {
 
         // if the worker is not a new worker joining the cluster (or we are not in cluster mode)
         // than this is a no-op.
-        // TODO worker.join_cluster();
+        if worker.bootstrap() {
+            return
+        }
 
         // introduce data and watch!
-        for round in 0..10 {
+        for round in 0..30 {
             if index == 0 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
                 input.send(round);
             }
             input.advance_to(round + 1);

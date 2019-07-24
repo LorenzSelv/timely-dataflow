@@ -188,7 +188,7 @@ where
 
         // create handles for the subgraph progcaster
         progcasters_client_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
-        progcasters_client_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
+        progcasters_server_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
 
         let mut incomplete = vec![true; self.children.len()];
         incomplete[0] = false;
@@ -267,6 +267,7 @@ where
     pointstamp_tracker: reachability::Tracker<TInner>,
 
     // channel / whatever used to communicate pointstamp updates to peers.
+    // TODO(lorenzo) should be rc refcell
     progcaster: Arc<Mutex<Progcaster<TInner>>>,
 
     // handles to the wrapped progcasters

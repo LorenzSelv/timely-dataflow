@@ -99,7 +99,7 @@ pub fn read_decode<T: Abomonation + Copy>(stream: &mut TcpStream) -> T {
 
 /// TODO
 pub fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
-    let mut buf = vec![0_u8; abomonation::measure(typed)];
+    let mut buf = Vec::new();
     unsafe { abomonation::encode(typed, &mut buf) }.expect("encode error");
     stream.write(&buf[..]).expect("write error");
 }

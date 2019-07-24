@@ -438,9 +438,11 @@ impl<A: Allocate> Worker<A> {
         let mut operator = subscope.into_inner().build(self);
 
         let (client_handles, server_handles) = operator.get_progcasters_handles();
+        println!("handles length is {:?}", client_handles.len());
 
         self.progcaster_client_handles.extend(client_handles);
         self.progcaster_server_handles.extend(server_handles);
+        println!("handles length is {:?}", self.progcaster_server_handles.len());
 
         logging.as_mut().map(|l| l.log(crate::logging::OperatesEvent {
             id: identifier,
@@ -471,24 +473,33 @@ impl<A: Allocate> Worker<A> {
 
     /// TODO(lorenzo) doc
     pub fn bootstrap(&mut self) -> bool {
+        println!("enter bootstrap");
+
         let bootstrap_endpoint = self.allocator.borrow_mut().get_bootstrap_endpoint();
 
         if let Some(bootstrap_endpoint) = bootstrap_endpoint {
 
             let progcaster_states = bootstrap_endpoint.recv_progcaster_states();
 
+            println!("[W{}] got the states!", self.index());
+
             for (id, state) in progcaster_states.into_iter() {
                 self.progcaster_client_handles[&id].set_progcaster_state(state);
             }
 
+            println!("[W{}] set the states!", self.index());
+
             let server_index = bootstrap_endpoint.get_server_index();
 
             for progcaster in self.progcaster_client_handles.values() {
+                println!("[W{}] getting ranges!", self.index());
                 for missing_range in progcaster.get_missing_updates_ranges(server_index).into_iter() {
                     bootstrap_endpoint.send_range_request(missing_range.clone());
+                    println!("[W{}] applying updates range", self.index());
                     progcaster.apply_updates_range(missing_range, bootstrap_endpoint.recv_range_response());
                 }
 
+                println!("[W{}] applying stashed", self.index());
                 progcaster.apply_stashed_progress_msgs();
             }
 

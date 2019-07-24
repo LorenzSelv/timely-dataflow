@@ -135,7 +135,7 @@ impl Configuration {
                                 (send, Some(recv))
                             }).unzip();
 
-                        let bootstrap_address = std::env::var("BOOTSTRAP_ADDR").unwrap_or("localhost:9000".to_string());
+                        let bootstrap_address = std::env::var("BOOTSTRAP_ADDR").unwrap_or("127.0.0.1:9000".to_string());
                         let bootstrap_address = SocketAddrV4::from_str(bootstrap_address.as_str()).expect("cannot parse BOOTSTRAP_ADDRESS");
 
                         let bootstrap_info = Some((server_index, bootstrap_address));

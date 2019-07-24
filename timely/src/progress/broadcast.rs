@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use abomonation::Abomonation;
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ProgressState<T: Timestamp> {
     /// compacted ChangeBatch: all updates ever sent/recved accumulated
     change_batch: ChangeBatch<(Location,T)>,
@@ -62,12 +62,17 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let worker_index = progress_msg.0;
         let seq_no = progress_msg.1;
         let progress_vec = &progress_msg.2;
+        println!("state before update: {:?}", self.worker_seqno);
+        println!("update {} {} {:?}", worker_index, seq_no, progress_vec);
 
         // make sure the message is the next message we expect to read
         if let Some(expected_seqno) = self.worker_seqno.insert(worker_index, seq_no + 1) {
             assert_eq!(expected_seqno, seq_no, "got wrong seqno!");
         } else {
-            assert_eq!(seq_no, 0, "first seqno should be 0!");
+            if seq_no != 0 {
+                println!("first seqno of worker {} should be 0! state is {:?}", worker_index, self.worker_seqno);
+                assert_eq!(seq_no, 0);
+            }
         }
 
         // apply all updates in the message
@@ -171,7 +176,6 @@ pub type ProgressMsg<T> = Message<(usize, usize, ProgressVec<T>)>;
 pub struct Progcaster<T:Timestamp> {
     // reuse allocations
     to_push: Option<ProgressMsg<T>>,
-    to_progress_state: Option<ProgressMsg<T>>,
 
     pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>, // TODO: this will become and hashmap, and we get the IDs from there
     puller: Box<Pull<ProgressMsg<T>>>,
@@ -221,7 +225,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
         let addr = path.clone();
         Progcaster {
             to_push: None,
-            to_progress_state: None,
             pushers: pushers2,
             puller,
             source: worker_index,
@@ -244,7 +247,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
     /// Sends pointstamp changes to all workers.
     pub fn send(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
-
         assert!(!self.is_recording, "don't send during rescaling operations");
 
         changes.compact();
@@ -260,12 +262,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 messages: Vec::new(),
                 internal: Vec::new(),
             }));
-
-            Progcaster::fill_message(&mut self.to_progress_state, self.source, self.counter, &mut changes);
-
-            if let Some(message) = &self.to_progress_state {
-                self.progress_state.update(message);
-            }
 
             for pusher in self.pushers.borrow_mut().iter_mut() {
 

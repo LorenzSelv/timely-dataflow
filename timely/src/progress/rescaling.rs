@@ -25,6 +25,7 @@ fn start_connection(my_index: usize, address: SocketAddrV4) -> TcpStream {
 
 /// TODO documentation
 pub fn bootstrap_worker_server(my_index: usize, target_address: SocketAddrV4, progcasters: HashMap<usize, Box<dyn ProgcasterServerHandle>>) {
+    println!("progcaster lenght in bootstrap server is {}", progcasters.len());
 
     // connect to target_address
     let mut tcp_stream = start_connection(my_index, target_address);
