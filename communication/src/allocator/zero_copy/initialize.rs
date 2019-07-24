@@ -36,6 +36,7 @@ use crate::allocator::zero_copy::bytes_exchange::MergeQueue;
 use std::sync::mpsc::{Sender, Receiver};
 use std::thread::JoinHandle;
 use crate::rescaling::send_bootstrap_addr;
+use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
 
 /// Returns a logger for communication events
 pub type LogSender = Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>;
@@ -46,6 +47,7 @@ pub fn initialize_networking(
     my_index: usize,
     threads: usize,
     bootstrap_info: Option<(usize, SocketAddrV4)>,
+    bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>,
     noisy: bool,
     log_sender: LogSender)
 -> ::std::io::Result<(Vec<TcpBuilder<ProcessBuilder>>, CommsGuard)>
@@ -76,7 +78,7 @@ pub fn initialize_networking(
     });
 
     let process_allocators = crate::allocator::process::Process::new_vector(threads);
-    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, rescaler_rxs);
+    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, rescaler_rxs, bootstrap_recv_endpoints);
 
     let mut promises_iter = promises.into_iter();
     let mut futures_iter = futures.into_iter();

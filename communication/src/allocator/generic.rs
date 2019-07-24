@@ -14,6 +14,7 @@ use crate::allocator::zero_copy::allocator_process::{ProcessBuilder, ProcessAllo
 use crate::allocator::zero_copy::allocator::{TcpBuilder, TcpAllocator};
 
 use crate::{Pull, Data, Message};
+use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
 
 /// Enumerates known implementors of `Allocate`.
 /// Passes trait method calls on to members.
@@ -94,6 +95,13 @@ impl Generic {
             &Generic::ZeroCopy(ref z) => z.events(),
         }
     }
+
+    fn get_bootstrap_endpoint(&mut self) -> Option<BootstrapRecvEndpoint> {
+        match self {
+            &mut Generic::ZeroCopy(ref mut z) => z.get_bootstrap_endpoint(),
+            _ => None,
+        }
+    }
 }
 
 impl Allocate for Generic {
@@ -119,6 +127,10 @@ impl Allocate for Generic {
             &Generic::ProcessBinary(ref pb) => pb.await_events(_duration),
             &Generic::ZeroCopy(ref z) => z.await_events(_duration),
         }
+    }
+
+    fn get_bootstrap_endpoint(&mut self) -> Option<BootstrapRecvEndpoint> {
+        self.get_bootstrap_endpoint()
     }
 }
 

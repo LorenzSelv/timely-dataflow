@@ -112,13 +112,13 @@ impl Configuration {
     }
 
     /// Attempts to assemble the described communication infrastructure.
-    pub fn try_build(self) -> Result<(Vec<GenericBuilder>, (Option<Vec<BootstrapRecvEndpoint>>, Box<Any>)), String> {
+    pub fn try_build(self) -> Result<(Vec<GenericBuilder>, Box<Any>), String> {
         match self {
             Configuration::Thread => {
-                Ok((vec![GenericBuilder::Thread(ThreadBuilder)], (None, Box::new(()))))
+                Ok((vec![GenericBuilder::Thread(ThreadBuilder)], Box::new(())))
             },
             Configuration::Process(threads) => {
-                Ok((Process::new_vector(threads).into_iter().map(|x| GenericBuilder::Process(x)).collect(), (None, Box::new(()))))
+                Ok((Process::new_vector(threads).into_iter().map(|x| GenericBuilder::Process(x)).collect(), Box::new(())))
             },
             Configuration::Cluster { threads, process, addresses, report, join, log_fn } => {
 
@@ -130,9 +130,9 @@ impl Configuration {
                                 let (range_req_tx, range_req_rx) = std::sync::mpsc::channel();
                                 let (range_ans_tx, range_ans_rx) = std::sync::mpsc::channel();
 
-                                let send = BootstrapSendEndpoint::new(state_tx, range_req_rx, range_ans_tx);
-                                let recv = BootstrapRecvEndpoint::new(state_rx, range_req_tx, range_ans_rx);
-                                (send, recv)
+                                let send = BootstrapSendEndpoint::new(state_tx, range_req_rx, range_ans_tx, server_index);
+                                let recv = BootstrapRecvEndpoint::new(state_rx, range_req_tx, range_ans_rx, server_index);
+                                (send, Some(recv))
                             }).unzip();
 
                         let bootstrap_address = std::env::var("BOOTSTRAP_ADDR").unwrap_or("localhost:9000".to_string());
@@ -143,16 +143,16 @@ impl Configuration {
                         // spawn the bootstrap thread, passing bootstrap endpoints (one for every worker thread to bootstrap)
                         std::thread::spawn(move || bootstrap_worker_client(bootstrap_address, sends));
 
-                        (bootstrap_info, Some(recvs))
+                        (bootstrap_info, recvs)
                     } else {
-                        (None, None)
+                        (None, (0..threads).map(|_| None).collect())
                     };
 
 
-                match initialize_networking(addresses, process, threads, bootstrap_info, report, log_fn) {
+                match initialize_networking(addresses, process, threads, bootstrap_info, bootstrap_recv_endpoints, report, log_fn) {
                     Ok((stuff, guard)) => {
                         let builders = stuff.into_iter().map(|x| GenericBuilder::ZeroCopy(x)).collect();
-                        Ok((builders, (bootstrap_recv_endpoints, Box::new(guard))))
+                        Ok((builders, Box::new(guard)))
                     },
                     Err(err) => Err(format!("failed to initialize networking: {}", err))
                 }
@@ -244,8 +244,6 @@ pub fn initialize<T:Send+'static, F: Fn(Generic)->T+Send+Sync+'static>(
     func: F,
 ) -> Result<WorkerGuards<T>,String> {
     let (allocators, others) = config.try_build()?;
-    assert!(others.0.is_none());
-    let others = others.1;
     initialize_from(allocators, others, func)
 }
 

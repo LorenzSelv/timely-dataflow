@@ -11,15 +11,17 @@ pub struct BootstrapSendEndpoint {
     state_tx: Sender<Vec<(usize,Vec<u8>)>>,
     range_req_rx: Receiver<ProgressUpdatesRange>,
     range_ans_tx: Sender<Vec<u8>>,
+    _server_index: usize,
 }
 
 impl BootstrapSendEndpoint {
     /// TODO
-    pub fn new(state_tx: Sender<Vec<(usize,Vec<u8>)>>, range_req_rx: Receiver<ProgressUpdatesRange>, range_ans_tx: Sender<Vec<u8>>) -> Self {
+    pub fn new(state_tx: Sender<Vec<(usize,Vec<u8>)>>, range_req_rx: Receiver<ProgressUpdatesRange>, range_ans_tx: Sender<Vec<u8>>, _server_index: usize) -> Self {
         BootstrapSendEndpoint {
             state_tx,
             range_req_rx,
             range_ans_tx,
+            _server_index,
         }
     }
 }
@@ -29,16 +31,38 @@ pub struct BootstrapRecvEndpoint {
     state_rx: Receiver<Vec<(usize, Vec<u8>)>>,
     range_req_tx: Sender<ProgressUpdatesRange>,
     range_ans_rx: Receiver<Vec<u8>>,
+    server_index: usize,
 }
 
 impl BootstrapRecvEndpoint {
     /// TODO
-    pub fn new(state_rx: Receiver<Vec<(usize,Vec<u8>)>>, range_req_tx: Sender<ProgressUpdatesRange>, range_ans_rx: Receiver<Vec<u8>>) -> Self {
+    pub fn new(state_rx: Receiver<Vec<(usize,Vec<u8>)>>, range_req_tx: Sender<ProgressUpdatesRange>, range_ans_rx: Receiver<Vec<u8>>, server_index: usize) -> Self {
         BootstrapRecvEndpoint {
             state_rx,
             range_req_tx,
             range_ans_rx,
+            server_index,
         }
+    }
+
+    /// Receive progcaster states as a vector of (channel_id, state) pairs.
+    pub fn recv_progcaster_states(&self) -> Vec<(usize,Vec<u8>)> {
+        self.state_rx.recv().expect("recv_progcaster_states failed")
+    }
+
+    /// Send a progress update range request
+    pub fn send_range_request(&self, range: ProgressUpdatesRange) {
+        self.range_req_tx.send(range).expect("send_range_request failed")
+    }
+
+    /// Send a progress update range request
+    pub fn recv_range_response(&self) -> Vec<u8> {
+        self.range_ans_rx.recv().expect("recv_range_response failed")
+    }
+
+    /// Return the worker index of the bootstrap server
+    pub fn get_server_index(&self) -> usize {
+        self.server_index
     }
 }
 

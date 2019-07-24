@@ -469,6 +469,35 @@ impl<A: Allocate> Worker<A> {
 
     }
 
+    /// TODO(lorenzo) doc
+    pub fn bootstrap(&mut self) -> bool {
+        let bootstrap_endpoint = self.allocator.borrow_mut().get_bootstrap_endpoint();
+
+        if let Some(bootstrap_endpoint) = bootstrap_endpoint {
+
+            let progcaster_states = bootstrap_endpoint.recv_progcaster_states();
+
+            for (id, state) in progcaster_states.into_iter() {
+                self.progcaster_client_handles[&id].set_progcaster_state(state);
+            }
+
+            let server_index = bootstrap_endpoint.get_server_index();
+
+            for progcaster in self.progcaster_client_handles.values() {
+                for missing_range in progcaster.get_missing_updates_ranges(server_index).into_iter() {
+                    bootstrap_endpoint.send_range_request(missing_range.clone());
+                    progcaster.apply_updates_range(missing_range, bootstrap_endpoint.recv_range_response());
+                }
+
+                progcaster.apply_stashed_progress_msgs();
+            }
+
+            true
+        } else {
+            false
+        }
+    }
+
     // Acquire a new distinct dataflow identifier.
     fn allocate_dataflow_index(&mut self) -> usize {
         *self.dataflow_counter.borrow_mut() += 1;

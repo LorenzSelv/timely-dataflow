@@ -71,6 +71,8 @@ pub struct ChannelsEvent {
 pub struct ProgressEvent {
     /// `true` if the event is a send, and `false` if it is a receive.
     pub is_send: bool,
+    /// `true` if the event is already part of the progress state.
+    pub is_duplicate: bool,
     /// Source worker index.
     pub source: usize,
     /// Communication channel identifier

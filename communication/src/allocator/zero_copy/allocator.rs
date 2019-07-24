@@ -16,6 +16,7 @@ use crate::allocator::canary::Canary;
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
 use crate::rescaling::RescaleMessage;
+use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
 
 /// Builds an instance of a TcpAllocator.
 ///
@@ -32,6 +33,9 @@ pub struct TcpBuilder<A: AllocateBuilder> {
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
+
+    // TODO(lorenzo) explain
+    bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
 }
 
 /// Creates a vector of builders, sharing appropriate state.
@@ -51,7 +55,8 @@ pub fn new_vector<A: AllocateBuilder>(
     allocators: Vec<A>,
     my_process: usize,
     processes: usize,
-    rescaler_rxs: Vec<Receiver<RescaleMessage>>)
+    rescaler_rxs: Vec<Receiver<RescaleMessage>>,
+    bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>)
 -> (Vec<TcpBuilder<A>>,
     Vec<Vec<Sender<MergeQueue>>>,
     Vec<Vec<Receiver<MergeQueue>>>)
@@ -68,8 +73,9 @@ pub fn new_vector<A: AllocateBuilder>(
         .zip(worker_promises)
         .zip(worker_futures)
         .zip(rescaler_rxs)
+        .zip(bootstrap_recv_endpoints)
         .enumerate()
-        .map(|(index, (((inner, promises), futures), rescaler_rx))| {
+        .map(|(index, ((((inner, promises), futures), rescaler_rx), bootstrap_recv_endpoint))| {
             TcpBuilder {
                 inner,
                 index: my_process * threads + index,
@@ -77,6 +83,7 @@ pub fn new_vector<A: AllocateBuilder>(
                 promises,
                 futures,
                 rescaler_rx,
+                bootstrap_recv_endpoint,
             }})
         .collect();
 
@@ -102,6 +109,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             recvs,
             to_local: HashMap::new(),
             rescaler_rx: self.rescaler_rx,
+            bootstrap_recv_endpoint: self.bootstrap_recv_endpoint,
             channels: Vec::new(),
         }
     }
@@ -149,6 +157,9 @@ pub struct TcpAllocator<A: Allocate> {
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
+
+    // TODO(lorenzo) explain
+    bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
 
     // store channels allocated so far, so that we can back-fill them with
     // new pushers by calling the associated closur when a new worker process joins the cluster
@@ -381,5 +392,9 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     }
     fn await_events(&self, duration: Option<std::time::Duration>) {
         self.inner.await_events(duration);
+    }
+
+    fn get_bootstrap_endpoint(&mut self) -> Option<BootstrapRecvEndpoint> {
+        self.bootstrap_recv_endpoint.take()
     }
 }

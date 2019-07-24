@@ -20,6 +20,7 @@ pub mod zero_copy;
 
 use crate::{Data, Push, Pull, Message};
 use std::net::SocketAddrV4;
+use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
 
 /// A proto-allocator, which implements `Send` and can be completed with `build`.
 ///
@@ -130,6 +131,9 @@ pub trait Allocate {
     {
         thread::Thread::new_from(identifier, self.events().clone())
     }
+
+    /// If the worker is joining the cluster, return the endpoint to the bootstrapping thread
+    fn get_bootstrap_endpoint(&mut self) -> Option<BootstrapRecvEndpoint> { None }
 }
 
 /// A communication channel event.

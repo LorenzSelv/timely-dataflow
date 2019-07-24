@@ -54,6 +54,10 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         typed.clone()
     }
 
+    fn contains_update(&self, worker_index: usize, seqno: usize) -> bool {
+        self.worker_seqno[&worker_index] > seqno
+    }
+
     fn update(&mut self, progress_msg: &ProgressMsg<T>) {
         let worker_index = progress_msg.0;
         let seq_no = progress_msg.1;
@@ -244,6 +248,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
         if !changes.is_empty() {
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
                 is_send: true,
+                is_duplicate: false,
                 source: self.source,
                 channel: self.channel_identifier,
                 seq_no: self.counter,
@@ -307,11 +312,14 @@ impl<T:Timestamp+Send> Progcaster<T> {
             let counter = message.1;
             let recv_changes = &message.2;
 
+            let is_duplicate = self.progress_state.contains_update(source, counter);
+
             let addr = &mut self.addr;
             let channel = self.channel_identifier;
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
                 is_send: false,
-                source: source,
+                is_duplicate,
+                source,
                 seq_no: counter,
                 channel,
                 addr: addr.clone(),
@@ -320,16 +328,22 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 internal: Vec::new(),
             }));
 
-            // We clone rather than drain to avoid deserialization.
-            for &(ref update, delta) in recv_changes.iter() {
-                changes.update(update.clone(), delta);
-            }
+            // during rescaling, it could happen that the state for some worker (the last seqno associated with that worker)
+            // received by the bootstrap server is ahead of the direct TCP connection
+            // with that worker. In that case we should not re-apply the updates.
+            if !is_duplicate {
 
-            self.progress_state.update(&message);
+                // We clone rather than drain to avoid deserialization.
+                for &(ref update, delta) in recv_changes.iter() {
+                    changes.update(update.clone(), delta);
+                }
 
-            if self.is_recording {
-                let tuple = (self.source, self.counter, recv_changes.iter().cloned().collect());
-                self.recorder.append(Message::from_typed(tuple));
+                self.progress_state.update(&message);
+
+                if self.is_recording {
+                    let tuple = (self.source, self.counter, recv_changes.iter().cloned().collect());
+                    self.recorder.append(Message::from_typed(tuple));
+                }
             }
         }
     }
@@ -368,7 +382,7 @@ impl Clone for Box<ProgcasterServerHandle> {
 pub trait ProgcasterClientHandle {
 
     /// Set the encoded progress state of the progcaster
-    fn set_progress_state(&self, state: Vec<u8>);
+    fn set_progcaster_state(&self, state: Vec<u8>);
 
     /// Apply all updated provided in the encoded (abomonation::encode) vector of updates
     fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>);
@@ -442,7 +456,7 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
 
 impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
 
-    fn set_progress_state(&self, state: Vec<u8>) {
+    fn set_progcaster_state(&self, state: Vec<u8>) {
         let mut progcaster = self.lock().ok().expect("mutex error");
         progcaster.progress_state = ProgressState::decode(state);
     }

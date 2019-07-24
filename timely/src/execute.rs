@@ -174,8 +174,6 @@ where
 
     let (allocators, other) = config.try_build()?;
 
-    let other = other.1;
-
     initialize_from(allocators, other, move |allocator| {
 
         let mut worker = Worker::new(allocator); // TODO , bootstrap_recv_endpoint);
