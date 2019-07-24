@@ -110,6 +110,7 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
     // wait for the server to initiate the connection
     let mut tcp_stream = await_connection(source_address);
 
+    // (0) read how many progcasters' states there are to receive
     let channel_num: usize = read_decode(&mut tcp_stream);
 
     let mut states = Vec::with_capacity(channel_num);
@@ -152,5 +153,7 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
             // (3) send back encoded range answer
             endpoint.range_ans_tx.send(range_ans_buf).expect("send failed");
         }
+
+        println!("done bootstrapping a worker");
     }
 }

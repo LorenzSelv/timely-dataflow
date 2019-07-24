@@ -55,7 +55,7 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
     }
 
     fn contains_update(&self, worker_index: usize, seqno: usize) -> bool {
-        self.worker_seqno[&worker_index] > seqno
+        self.worker_seqno.get(&worker_index).map(|&next_seqno| next_seqno > seqno).unwrap_or(false)
     }
 
     fn update(&mut self, progress_msg: &ProgressMsg<T>) {
@@ -64,8 +64,11 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let progress_vec = &progress_msg.2;
 
         // make sure the message is the next message we expect to read
-        assert_eq!(self.worker_seqno[&worker_index], seq_no);
-        self.worker_seqno.insert(worker_index, seq_no + 1);
+        if let Some(expected_seqno) = self.worker_seqno.insert(worker_index, seq_no + 1) {
+            assert_eq!(expected_seqno, seq_no, "got wrong seqno!");
+        } else {
+            assert_eq!(seq_no, 0, "first seqno should be 0!");
+        }
 
         // apply all updates in the message
         for (pointstamp, delta) in progress_vec.into_iter() {
