@@ -9,9 +9,8 @@ use std::cell::RefCell;
 use crate::communication::rescaling::bootstrap::ProgressUpdatesRange;
 use std::collections::{HashMap, HashSet};
 use abomonation::Abomonation;
-use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ProgressState<T: Timestamp> {
     /// compacted ChangeBatch: all updates ever sent/recved accumulated
     change_batch: ChangeBatch<(Location,T)>,
@@ -43,12 +42,15 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressState<T> {}
 impl<T: Timestamp+Abomonation> ProgressState<T> {
 
     fn encode(&mut self) -> Vec<u8> {
-        let mut buf = vec![0_u8; abomonation::measure(self)];
+        let mut buf = Vec::new();
+        println!("before encode: state is {:?}", self);
         unsafe { abomonation::encode(self, &mut buf) }.expect("encode error");
+        println!("after encode: buffer is {:?}", buf);
         buf
     }
 
     fn decode(mut buf: Vec<u8>) -> Self {
+        println!("before decode: buffer is {:?}", buf);
         let (typed, remaining) = unsafe { abomonation::decode::<Self>(&mut buf[..]) }.expect("decode error");
         assert_eq!(remaining.len(), 0);
         typed.clone()
@@ -453,16 +455,17 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
     }
 }
 
-impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
+impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
 
     fn set_progcaster_state(&self, state: Vec<u8>) {
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         progcaster.progress_state = ProgressState::decode(state);
+        println!("decoded state is {:?}", progcaster.progress_state);
     }
 
     fn get_missing_updates_ranges(&self, server_index: usize) -> Vec<ProgressUpdatesRange> {
 
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         let progcaster = &mut *progcaster;
 
         let mut worker_todo: HashSet<usize> = progcaster.progress_state.worker_seqno.keys().map(|x| *x).collect();
@@ -517,12 +520,12 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
     }
 
     fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         progcaster.progress_state.apply_updates_range(range, updates_range)
     }
 
     fn apply_stashed_progress_msgs(&self) {
-        let mut progcaster = self.lock().ok().expect("mutex error");
+        let mut progcaster = self.borrow_mut();
         let progcaster = &mut *progcaster;
 
         for message in progcaster.progress_msg_stash.iter() {
@@ -533,6 +536,50 @@ impl<T: Timestamp> ProgcasterClientHandle for Arc<Mutex<Progcaster<T>>> {
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle> {
-        Box::new(Arc::clone(&self))
+        Box::new(Rc::clone(&self))
+    }
+}
+
+mod test {
+    use crate::progress::broadcast::ProgressState;
+    use crate::progress::{Location, Port, ChangeBatch};
+    use crate::progress::Port::{Source, Target};
+    use std::collections::HashMap;
+
+    #[test]
+    fn state_encode_decode() {
+
+        let mut state = ProgressState::<u32>::new();
+        
+        state.change_batch.update((Location{ node: 0, port: Port::Target(2) }, 4_u32), 4);
+        state.change_batch.update((Location{ node: 3, port: Port::Source(4) }, 8_u32), 9);
+        state.change_batch.compact();
+
+        state.worker_seqno.insert(7, 8);
+
+        let buf = state.encode();
+
+        let mut state_dec = ProgressState::decode(buf);
+        state_dec.change_batch.compact();
+
+        assert_eq!(state, state_dec);
+    }
+
+    #[test]
+    fn hardcoded() {
+        let  buf = vec![80, 94, 2, 224, 160, 127, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 124, 42, 30, 207, 220, 65, 152, 248, 5, 141, 125, 42, 33, 18, 154, 227, 31, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 160, 226, 1, 224, 160, 127, 0, 0];
+        let mut state_dec = ProgressState::<u64>::decode(buf);
+        println!("state_dec is {:?}", state_dec);
+    }
+
+    #[test]
+    fn real() {
+        let mut state: ProgressState<u64> = ProgressState { change_batch: ChangeBatch { updates: vec![((Location { node: 1, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 1), 1), ((Location { node: 2, port: Source(0) }, 0), -1), ((Location { node: 3, port: Source(0) }, 0), -1), ((Location { node: 4, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 1), 1), ((Location { node: 2, port: Source(0) }, 0), -1), ((Location { node: 3, port: Source(0) }, 0), -1), ((Location { node: 4, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 1), -1), ((Location { node: 1, port: Source(0) }, 2), 1), ((Location { node: 1, port: Source(0) }, 1), -1), ((Location { node: 1, port: Source(0) }, 2), 1), ((Location { node: 2, port: Target(0) }, 1), 1), ((Location { node: 2, port: Target(0) }, 1), -1)], clean: 0 }, worker_seqno: HashMap::new()};
+        let buf = vec![208, 51, 2, 208, 0, 127, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 51, 32, 163, 25, 196, 39, 2, 248, 252, 4, 66, 86, 92, 72, 91, 169, 31, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 160, 226, 1, 208, 0, 127, 0, 0];
+        state.worker_seqno.insert(1, 3);
+        state.worker_seqno.insert(0, 2);
+        state.change_batch.compact();
+        let buf_enc = state.encode();
+        assert_eq!(buf_enc, buf);
     }
 }

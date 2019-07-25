@@ -115,7 +115,7 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
 
     let mut states = Vec::with_capacity(channel_num);
 
-    for _ in 0..states.len() {
+    for _ in 0..channel_num {
 
         // (1) read channel_id
         let channel_id: usize = read_decode(&mut tcp_stream);

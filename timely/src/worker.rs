@@ -481,7 +481,7 @@ impl<A: Allocate> Worker<A> {
 
             let progcaster_states = bootstrap_endpoint.recv_progcaster_states();
 
-            println!("[W{}] got the states!", self.index());
+            println!("[W{}] got the states of length {}!", self.index(), progcaster_states.len());
 
             for (id, state) in progcaster_states.into_iter() {
                 self.progcaster_client_handles[&id].set_progcaster_state(state);

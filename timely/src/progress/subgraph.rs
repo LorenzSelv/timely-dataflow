@@ -23,7 +23,6 @@ use crate::progress::ChangeBatch;
 use crate::progress::broadcast::{Progcaster, ProgcasterClientHandle, ProgcasterServerHandle};
 use crate::progress::reachability;
 use crate::progress::timestamp::Refines;
-use std::sync::{Arc, Mutex};
 
 // IMPORTANT : by convention, a child identifier of zero is used to indicate inputs and outputs of
 // the Subgraph itself. An identifier greater than zero corresponds to an actual child, which can
@@ -184,11 +183,11 @@ where
         // allocate a new progcaster for this subgraph
         let progcaster = Progcaster::new(worker, &self.path, self.logging.clone());
         let progcaster_id = progcaster.channel_id();
-        let progcaster = Arc::new(Mutex::new(progcaster));
+        let progcaster = Rc::new(RefCell::new(progcaster));
 
         // create handles for the subgraph progcaster
-        progcasters_client_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
-        progcasters_server_handles.insert(progcaster_id, Box::new(Arc::clone(&progcaster)));
+        progcasters_client_handles.insert(progcaster_id, Box::new(Rc::clone(&progcaster)));
+        progcasters_server_handles.insert(progcaster_id, Box::new(Rc::clone(&progcaster)));
 
         let mut incomplete = vec![true; self.children.len()];
         incomplete[0] = false;
@@ -268,7 +267,7 @@ where
 
     // channel / whatever used to communicate pointstamp updates to peers.
     // TODO(lorenzo) should be rc refcell
-    progcaster: Arc<Mutex<Progcaster<TInner>>>,
+    progcaster: Rc<RefCell<Progcaster<TInner>>>,
 
     // handles to the wrapped progcasters
     progcasters_client_handles: HashMap<usize, Box<dyn ProgcasterClientHandle>>,
@@ -300,7 +299,7 @@ where
         self.harvest_inputs();          // Count records entering the scope.
 
         // Receive post-exchange progress updates.
-        self.progcaster.lock().ok().expect("mutex error").recv(&mut self.final_pointstamp);
+        self.progcaster.borrow_mut().recv(&mut self.final_pointstamp);
 
         // Commit and propagate final pointstamps.
         self.propagate_pointstamps();
@@ -519,10 +518,8 @@ where
                 )
         };
 
-        let mut progcaster = self.progcaster.lock().ok().expect("mutex error");
-
         if must_send {
-            progcaster.send(&mut self.local_pointstamp);
+            self.progcaster.borrow_mut().send(&mut self.local_pointstamp);
         }
     }
 }
