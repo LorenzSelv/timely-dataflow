@@ -37,23 +37,35 @@ impl<T: Timestamp> ProgressState<T> {
     }
 }
 
-impl<T: Timestamp+Abomonation> Abomonation for ProgressState<T> {}
-
 impl<T: Timestamp+Abomonation> ProgressState<T> {
 
     fn encode(&mut self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        // As HashMap does not implement Abomonation, we need to encode it as a vector.
+        // We encode the change batch and the worker_seqno separately, one after the other.
         println!("before encode: state is {:?}", self);
-        unsafe { abomonation::encode(self, &mut buf) }.expect("encode error");
+
+        let mut buf = Vec::new();
+        // encode change_batch
+        unsafe { abomonation::encode(&self.change_batch, &mut buf) }.expect("encode error");
+        // encode worker_seqno
+        let worker_seqno_vec: Vec<(usize,usize)> = self.worker_seqno.iter().map(|(x,y)| (*x, *y)).collect();
+        unsafe { abomonation::encode(&worker_seqno_vec, &mut buf) }.expect("encode error");
+
         println!("after encode: buffer is {:?}", buf);
         buf
     }
 
     fn decode(mut buf: Vec<u8>) -> Self {
         println!("before decode: buffer is {:?}", buf);
-        let (typed, remaining) = unsafe { abomonation::decode::<Self>(&mut buf[..]) }.expect("decode error");
+        let (typed, mut remaining) = unsafe { abomonation::decode::<ChangeBatch<(Location,T)>>(&mut buf[..]) }.expect("decode error");
+        let change_batch = typed.clone();
+        let (typed, remaining) = unsafe { abomonation::decode::<Vec<(usize,usize)>>(&mut remaining) }.expect("decode error");
+        let worker_seqno: HashMap<usize,usize> = typed.iter().map(|&x| x).collect();
         assert_eq!(remaining.len(), 0);
-        typed.clone()
+        ProgressState {
+            change_batch,
+            worker_seqno,
+        }
     }
 
     fn contains_update(&self, worker_index: usize, seqno: usize) -> bool {
@@ -537,49 +549,5 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
 
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle> {
         Box::new(Rc::clone(&self))
-    }
-}
-
-mod test {
-    use crate::progress::broadcast::ProgressState;
-    use crate::progress::{Location, Port, ChangeBatch};
-    use crate::progress::Port::{Source, Target};
-    use std::collections::HashMap;
-
-    #[test]
-    fn state_encode_decode() {
-
-        let mut state = ProgressState::<u32>::new();
-        
-        state.change_batch.update((Location{ node: 0, port: Port::Target(2) }, 4_u32), 4);
-        state.change_batch.update((Location{ node: 3, port: Port::Source(4) }, 8_u32), 9);
-        state.change_batch.compact();
-
-        state.worker_seqno.insert(7, 8);
-
-        let buf = state.encode();
-
-        let mut state_dec = ProgressState::decode(buf);
-        state_dec.change_batch.compact();
-
-        assert_eq!(state, state_dec);
-    }
-
-    #[test]
-    fn hardcoded() {
-        let  buf = vec![80, 94, 2, 224, 160, 127, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 124, 42, 30, 207, 220, 65, 152, 248, 5, 141, 125, 42, 33, 18, 154, 227, 31, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 160, 226, 1, 224, 160, 127, 0, 0];
-        let mut state_dec = ProgressState::<u64>::decode(buf);
-        println!("state_dec is {:?}", state_dec);
-    }
-
-    #[test]
-    fn real() {
-        let mut state: ProgressState<u64> = ProgressState { change_batch: ChangeBatch { updates: vec![((Location { node: 1, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 1), 1), ((Location { node: 2, port: Source(0) }, 0), -1), ((Location { node: 3, port: Source(0) }, 0), -1), ((Location { node: 4, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 1), 1), ((Location { node: 2, port: Source(0) }, 0), -1), ((Location { node: 3, port: Source(0) }, 0), -1), ((Location { node: 4, port: Source(0) }, 0), -1), ((Location { node: 1, port: Source(0) }, 1), -1), ((Location { node: 1, port: Source(0) }, 2), 1), ((Location { node: 1, port: Source(0) }, 1), -1), ((Location { node: 1, port: Source(0) }, 2), 1), ((Location { node: 2, port: Target(0) }, 1), 1), ((Location { node: 2, port: Target(0) }, 1), -1)], clean: 0 }, worker_seqno: HashMap::new()};
-        let buf = vec![208, 51, 2, 208, 0, 127, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 51, 32, 163, 25, 196, 39, 2, 248, 252, 4, 66, 86, 92, 72, 91, 169, 31, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 160, 226, 1, 208, 0, 127, 0, 0];
-        state.worker_seqno.insert(1, 3);
-        state.worker_seqno.insert(0, 2);
-        state.change_batch.compact();
-        let buf_enc = state.encode();
-        assert_eq!(buf_enc, buf);
     }
 }
