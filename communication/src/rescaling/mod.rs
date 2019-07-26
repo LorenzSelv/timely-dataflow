@@ -13,6 +13,7 @@ use std::io::Read;
 use crate::rescaling::bootstrap::encode_write;
 
 /// Information to perform the rescaling
+#[derive(Debug)]
 pub struct RescaleMessage {
     /// to share a recv merge queue
     pub promise: Sender<MergeQueue>,

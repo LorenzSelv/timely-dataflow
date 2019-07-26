@@ -262,17 +262,9 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         // try receiving from the rescale thread - did any new worker process initiated a connection?
         if let Ok(rescale_message) = self.rescaler_rx.try_recv() {
 
+            println!("[rescale] rescale_message is {:?}", rescale_message);
+
             let RescaleMessage { promise, future, bootstrap_addr } = rescale_message;
-
-            if let Some(addr) = bootstrap_addr {
-                // This worker was selected to bootstrap the progress tracker of the new worker,
-                // spawn the bootstrap thread
-
-                // cannot send some of the progcaster members (Rc stuff) to other thread safely,
-                // need to call the closure directly
-                // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
-                bootstrap_closure(self.index, addr);
-            }
 
             // A new process joined. The rescaler thread spawned a new pair of network thread
             // for sending/receiving from this new worker process. We need to setup shared `MergeQueue`
@@ -307,14 +299,25 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                         source: self_index,
                         target: self_peers + thread_idx, // see assumption above
                         length: 0,
-                        seqno: 0,
+                        seqno: 0, // note: this is not the seqno that we look at for progress updates, 0 should be fine
                     };
                     on_new_pusher(Box::new(Pusher::new(header, new_send.clone())));
                 });
             }
 
             // the new process adds `threads` new workers to the cluster
+            // TODO(lorenzo) without routing tables..?
             self.peers += threads;
+
+            if let Some(addr) = bootstrap_addr {
+                // This worker was selected to bootstrap the progress tracker of the new worker,
+                // spawn the bootstrap thread
+
+                // cannot send some of the progcaster members (Rc stuff) to other thread safely,
+                // need to call the closure directly
+                // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
+                bootstrap_closure(self.index, addr);
+            }
         }
     }
 

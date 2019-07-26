@@ -10,6 +10,7 @@ use crate::communication::rescaling::bootstrap::ProgressUpdatesRange;
 use std::collections::{HashMap, HashSet};
 use abomonation::Abomonation;
 
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProgressState<T: Timestamp> {
     /// compacted ChangeBatch: all updates ever sent/recved accumulated
@@ -43,15 +44,12 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         // As HashMap does not implement Abomonation, we need to encode it as a vector.
         // We encode the change batch and the worker_seqno separately, one after the other.
         println!("before encode: state is {:?}", self);
-
         let mut buf = Vec::new();
         // encode change_batch
         unsafe { abomonation::encode(&self.change_batch, &mut buf) }.expect("encode error");
         // encode worker_seqno
         let worker_seqno_vec: Vec<(usize,usize)> = self.worker_seqno.iter().map(|(x,y)| (*x, *y)).collect();
         unsafe { abomonation::encode(&worker_seqno_vec, &mut buf) }.expect("encode error");
-
-        println!("after encode: buffer is {:?}", buf);
         buf
     }
 
@@ -103,6 +101,8 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let (updates_range, remaining) = unsafe { abomonation::decode::<ProgressVec<T>>(&mut buf[..]) }.expect("decode error");
         assert_eq!(remaining.len(), 0);
 
+        println!("   applying updates range response {:?}", updates_range);
+
         for (pointstamp, delta) in updates_range.into_iter() {
             self.change_batch.update(pointstamp.clone(), *delta);
         }
@@ -137,21 +137,15 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
 impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
     fn has_updates_range(&mut self, range: &ProgressUpdatesRange) -> bool {
-        let msgs = &self.worker_msgs[&range.worker_index];
-
-        if let Some(first_msg) = msgs.first() {
-
-            let last_msg = msgs.last().unwrap();
-
-            let first_seqno = first_msg.1;
-            let last_seqno = last_msg.1;
-
-            // `range.end_seqno` is exclusive: the new worker will read that message
-            // from the direct connection with the other worker.
-            first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno
-        } else {
-            false
-        }
+        self.worker_msgs.get(&range.worker_index)
+            .and_then(|msgs| msgs.first().map(|first| (first, msgs.last().unwrap())))
+            .and_then(|(first_msg, last_msg)| {
+                let first_seqno = first_msg.1;
+                let last_seqno = last_msg.1;
+                // `range.end_seqno` is exclusive: the new worker will read that message
+                // from the direct connection with the other worker.
+                Some(first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno)
+            }).unwrap_or(false)
     }
 
     fn get_updates_range(&mut self, range: &ProgressUpdatesRange) -> Vec<u8> {
@@ -196,7 +190,7 @@ pub struct Progcaster<T:Timestamp> {
     /// Source worker index
     source: usize,
     /// Sequence number counter
-    counter: usize,
+    counter: Rc<RefCell<usize>>,
     /// Sequence of nested scope identifiers indicating the path from the root to this subgraph
     addr: Vec<usize>,
     /// Communication channel identifier
@@ -225,24 +219,49 @@ impl<T:Timestamp+Send> Progcaster<T> {
         let pushers1 = Rc::new(RefCell::new(Vec::with_capacity(worker.peers())));
         let pushers2 = Rc::clone(&pushers1);
 
-        let on_new_pusher = move |pusher| {
+        let worker_index = worker.index();
+
+        let counter1 = Rc::new(RefCell::new(0_usize));
+        let counter2 = Rc::clone(&counter1);
+
+        let send_bootstrap_message1 = Rc::new(RefCell::new(false));
+        let send_bootstrap_message2 = Rc::clone(&send_bootstrap_message1);
+
+        let on_new_pusher = move |mut pusher: Box<dyn Push<ProgressMsg<T>>>| {
+            // When a new worker joins, we send an empty progress message to let the worker
+            // know which is the next seqno it should expect to pull from the channel.
+            // We do it only for pushers added after the initial phase.
+            if *send_bootstrap_message1.borrow() {
+                let mut bootstrap_message = None;
+                let seqno = *(*counter1).borrow();
+                Progcaster::fill_message(&mut bootstrap_message, worker_index, seqno, &mut ChangeBatch::new());
+                println!("Sending bootstrap message seqno={}", seqno);
+                pusher.push(&mut bootstrap_message);
+                // (we do not increment the seqno, this is just a "flag" message
+            }
+
+            // Append the new pusher to the list of pushers.
             pushers1.borrow_mut().push(pusher);
         };
 
-        let puller= worker.allocate(channel_identifier, &path[..], on_new_pusher);
+        let puller = worker.allocate(channel_identifier, &path[..], on_new_pusher);
+
+        // `on_new_pusher` has been called multiple times to init the list of pushers.
+        // The closure will be called again only on rescaling and we should send the bootstrap message.
+        *send_bootstrap_message2.borrow_mut() = true;
 
         logging.as_mut().map(|l| l.log(crate::logging::CommChannelsEvent {
             identifier: channel_identifier,
             kind: crate::logging::CommChannelKind::Progress,
         }));
-        let worker_index = worker.index();
+
         let addr = path.clone();
         Progcaster {
             to_push: None,
             pushers: pushers2,
             puller,
             source: worker_index,
-            counter: 0,
+            counter: counter2,
             addr,
             channel_identifier,
             logging,
@@ -263,6 +282,8 @@ impl<T:Timestamp+Send> Progcaster<T> {
     pub fn send(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
         assert!(!self.is_recording, "don't send during rescaling operations");
 
+        println!("Sending ProgressMessage with seqno={}", *(*self.counter).borrow());
+
         changes.compact();
         if !changes.is_empty() {
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
@@ -270,7 +291,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 is_duplicate: false,
                 source: self.source,
                 channel: self.channel_identifier,
-                seq_no: self.counter,
+                seq_no: *(*self.counter).borrow(),
                 addr: self.addr.clone(),
                 // TODO: fill with additional data
                 messages: Vec::new(),
@@ -279,14 +300,15 @@ impl<T:Timestamp+Send> Progcaster<T> {
 
             for pusher in self.pushers.borrow_mut().iter_mut() {
 
-                Progcaster::fill_message(&mut self.to_push, self.source, self.counter, &mut changes);
+                let seqno = *self.counter.borrow();
+                Progcaster::fill_message(&mut self.to_push, self.source, seqno, &mut changes);
 
                 // TODO: This should probably use a broadcast channel.
                 pusher.push(&mut self.to_push);
                 pusher.done();
             }
 
-            self.counter += 1;
+            *self.counter.borrow_mut() += 1;
             changes.clear();
         }
     }
@@ -354,7 +376,8 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 self.progress_state.update(&message);
 
                 if self.is_recording {
-                    let tuple = (self.source, self.counter, recv_changes.iter().cloned().collect());
+                    let seqno = *self.counter.borrow();
+                    let tuple = (self.source, seqno, recv_changes.iter().cloned().collect());
                     self.recorder.append(Message::from_typed(tuple));
                 }
             }
@@ -405,7 +428,7 @@ pub trait ProgcasterClientHandle {
     /// to complete the initialization of the progcaster.
     /// `exclude_id` is the id of the worker acting as the bootstrap server. Since the
     /// bootstrapping is done synchronously, the
-    fn get_missing_updates_ranges(&self, exclude_id: usize) -> Vec<ProgressUpdatesRange>;
+    fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange>;
 
     /// To figure out the missing updates, we pulled from the channel and stashed
     /// away progress messages. These messages should be applied to the state to
@@ -475,59 +498,56 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
         println!("decoded state is {:?}", progcaster.progress_state);
     }
 
-    fn get_missing_updates_ranges(&self, server_index: usize) -> Vec<ProgressUpdatesRange> {
+    fn get_missing_updates_ranges(&self) -> Vec<ProgressUpdatesRange> {
 
-        let mut progcaster = self.borrow_mut();
-        let progcaster = &mut *progcaster;
+        let progcaster = &mut *self.borrow_mut();
 
         let mut worker_todo: HashSet<usize> = progcaster.progress_state.worker_seqno.keys().map(|x| *x).collect();
-
-        // The server worker will not push any progress message until bootstrapping is completed.
-        // When the worker will start reading from its direct connection with the server worker,
-        // it will find the next seqno after the one that appears in the state.
-        // Thus there will be no missing range with the server worker, we can remove it from the list.
-        worker_todo.remove(&server_index);
 
         let mut missing_ranges = Vec::new();
 
         while !worker_todo.is_empty() {
+            std::thread::sleep(std::time::Duration::from_secs(1)); // TODO(lorenzo) remove me
+            println!("workers left: {:?}", worker_todo);
 
-            while let Some(message) = progcaster.puller.pull() {
+            if let Some(message) = progcaster.puller.pull() {
                 let worker_index = message.0;
-                let msg_seq_no = message.1;
+                let msg_seqno = message.1;
                 let recv_changes = &message.2;
 
                 // state_seq_no is the next message that we should read and apply to the state
-                let state_seq_no = *progcaster.progress_state.worker_seqno.get(&worker_index).expect("msg from unknown worker");
-
-                // if the message is not included in the state, we need to stash it
-                // so we can apply it later
-                if state_seq_no <= msg_seq_no {
-                    let tuple = (worker_index, msg_seq_no, recv_changes.iter().cloned().collect());
-                    progcaster.progress_msg_stash.push(Message::from_typed(tuple));
-                }
+                let state_seqno = *progcaster.progress_state.worker_seqno.get(&worker_index).unwrap_or(&0_usize);
 
                 if worker_todo.contains(&worker_index) {
+                    // The first message received by a worker is the bootstrap_message.
+                    // The bootstrap_message carries no updates and is just used to signal what is the
+                    // next seqno the worker should expect to pull from the channel.
+                    assert_eq!(recv_changes.len(), 0);
+                    worker_todo.remove(&worker_index);
 
-                    if state_seq_no < msg_seq_no {
+                    println!("Got bootstrap message: worker={} seqno={}", worker_index, msg_seqno);
+
+                    if state_seqno < msg_seqno {
                         // state is behind of the direct connection with `worker_index`
-                        // we will read `msg_seq_no` and all the following updates, but we need to ask
-                        // for the missing range [state_seq_no..msg_seq_no[
+                        // we will read `msg_seqno` and all the following updates, but we need to ask
+                        // for the missing range [state_seqno..msg_seqno[
                         let missing_range = ProgressUpdatesRange {
                             channel_id: progcaster.channel_identifier,
                             worker_index,
-                            start_seqno: state_seq_no,
-                            end_seqno: msg_seq_no,
+                            start_seqno: state_seqno,
+                            end_seqno: msg_seqno,
                         };
                         missing_ranges.push(missing_range);
                     }
-
-                    // in all cases, we are done with this worker
-                    worker_todo.remove(&worker_index);
+                } else {
+                    // Other workers are still making progress, so they might send more progress updates
+                    // before all workers get the chance to send their init_message.
+                    // If that's the case we need to stash the progress updates
+                    let tuple = (worker_index, msg_seqno, recv_changes.iter().cloned().collect());
+                    progcaster.progress_msg_stash.push(Message::from_typed(tuple));
                 }
             }
         }
-
         missing_ranges
     }
 

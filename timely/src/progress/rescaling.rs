@@ -64,7 +64,9 @@ pub fn bootstrap_worker_server(my_index: usize, target_address: SocketAddrV4, pr
             let (range_req, remaining) = unsafe { abomonation::decode::<ProgressUpdatesRange>(&mut request_buf[..]) }.expect("decode error");
             assert_eq!(remaining.len(), 0);
 
-            let progcaster = &progcasters[&range_req.channel_id];
+            println!("got update_range request: {:?}", range_req);
+
+            let progcaster = &progcasters.get(&range_req.channel_id).expect("progcaster not found");
 
             let updates_range = progcaster.get_updates_range(range_req);
 

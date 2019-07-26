@@ -197,7 +197,9 @@ impl<A: Allocate> Worker<A> {
             // Also, if we were selected for bootstrapping the new worker's progress tracker,
             // then the bootstrap_worker_server closure will be invoked.
             let handles = self.progcaster_server_handles.clone();
+            // TODO self.publish() as part of the bootstrapClosure <============================================
             allocator.rescale(|my_index, addr| crate::progress::rescaling::bootstrap_worker_server(my_index, addr, handles));
+            println!("after rescale call");
 
             allocator.receive();
 
@@ -489,14 +491,29 @@ impl<A: Allocate> Worker<A> {
 
             println!("[W{}] set the states!", self.index());
 
-            let server_index = bootstrap_endpoint.get_server_index();
+            self.allocator.borrow_mut().receive();
+
+            // TODO(lorenzo): lack of progress updates cause a problem; the get_missing_updates_ranges expects
+            //      to read at least 1 progress update from each worker
+            //      If there are no progress updates that it waits.
+            //      Possible solutions:
+            //      1) timeout based -- subject to race conditions
+            //      2) during rescaling, after opening a socket to each worker, they write in the socket a vector of (channel_id, last_seqno_sent)
+            //         the new worker is then guaranteed to read form `last_seqno_sent + 1` onwards (see below)
+            // TODO
+            //         problem: new pushers are appended only when calling `rescale`, so if there is an ongoing computation step, it might push progress updates
+            //         which are larger than last_seqno_sent but will not be pushed in the new channel
+            //         possible workaround -- since each step round send at only one progress message => last_seqno_sent+1 is guaranteed
 
             for progcaster in self.progcaster_client_handles.values() {
                 println!("[W{}] getting ranges!", self.index());
-                for missing_range in progcaster.get_missing_updates_ranges(server_index).into_iter() {
+                for missing_range in progcaster.get_missing_updates_ranges().into_iter() {
                     bootstrap_endpoint.send_range_request(missing_range.clone());
-                    println!("[W{}] applying updates range", self.index());
-                    progcaster.apply_updates_range(missing_range, bootstrap_endpoint.recv_range_response());
+                    println!("[W{}] sent updates range {:?}", self.index(), missing_range);
+                    let response = bootstrap_endpoint.recv_range_response();
+                    println!("[W{}] got updates range response buf={:?}", self.index(), response);
+                    progcaster.apply_updates_range(missing_range, response);
+                    println!("[W{}] applied updates range response", self.index());
                 }
 
                 println!("[W{}] applying stashed", self.index());

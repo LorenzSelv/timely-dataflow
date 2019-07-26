@@ -75,7 +75,7 @@ fn await_connection(address: SocketAddrV4) -> TcpStream {
 }
 
 /// Identifies a range of progress updates
-#[derive(Clone,Abomonation)]
+#[derive(Clone, Debug, Abomonation)]
 pub struct ProgressUpdatesRange {
     /// identifier for the channel (also unique integer identifier for the scope)
     pub channel_id: usize,
