@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::cell::{RefCell, RefMut};
 use std::any::Any;
 use std::time::{Instant, Duration};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
 
 use crate::communication::{Allocate, Data, Pull};
@@ -197,7 +197,8 @@ impl<A: Allocate> Worker<A> {
             // Also, if we were selected for bootstrapping the new worker's progress tracker,
             // then the bootstrap_worker_server closure will be invoked.
             let handles = self.progcaster_server_handles.clone();
-            // TODO self.publish() as part of the bootstrapClosure <============================================
+            // TODO allocator.publish() as part of the bootstrapClosure ?
+            // TODO allocator.receive() as part of the bootstrapClosure
             allocator.rescale(|my_index, addr| crate::progress::rescaling::bootstrap_worker_server(my_index, addr, handles));
             println!("after rescale call");
 
@@ -491,8 +492,6 @@ impl<A: Allocate> Worker<A> {
 
             println!("[W{}] set the states!", self.index());
 
-            self.allocator.borrow_mut().receive();
-
             // TODO(lorenzo): lack of progress updates cause a problem; the get_missing_updates_ranges expects
             //      to read at least 1 progress update from each worker
             //      If there are no progress updates that it waits.
@@ -507,13 +506,27 @@ impl<A: Allocate> Worker<A> {
 
             for progcaster in self.progcaster_client_handles.values() {
                 println!("[W{}] getting ranges!", self.index());
-                for missing_range in progcaster.get_missing_updates_ranges().into_iter() {
-                    bootstrap_endpoint.send_range_request(missing_range.clone());
-                    println!("[W{}] sent updates range {:?}", self.index(), missing_range);
-                    let response = bootstrap_endpoint.recv_range_response();
-                    println!("[W{}] got updates range response buf={:?}", self.index(), response);
-                    progcaster.apply_updates_range(missing_range, response);
-                    println!("[W{}] applied updates range response", self.index());
+
+                // We want missing update ranges for every worker (or at least check if something is missing)
+                let mut worker_todo: HashSet<usize> = progcaster.get_worker_indices();
+
+                while !worker_todo.is_empty() {
+                    // std::thread::sleep(std::time::Duration::from_secs(1)); // TODO(lorenzo) remove me
+                    println!("workers left: {:?}", worker_todo);
+
+                    // make received messages surface in puller channels
+                    self.allocator.borrow_mut().receive();
+
+                    for missing_range in progcaster.get_missing_updates_ranges(&mut worker_todo).into_iter() {
+                        bootstrap_endpoint.send_range_request(missing_range.clone());
+                        println!("[W{}] sent updates range {:?}", self.index(), missing_range);
+
+                        let response = bootstrap_endpoint.recv_range_response();
+                        println!("[W{}] got updates range response buf={:?}", self.index(), response);
+
+                        progcaster.apply_updates_range(missing_range, response);
+                        println!("[W{}] applied updates range response", self.index());
+                    }
                 }
 
                 println!("[W{}] applying stashed", self.index());
