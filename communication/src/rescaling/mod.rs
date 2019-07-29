@@ -76,6 +76,7 @@ pub fn rescaler(my_index: usize,
                     bootstrap_addr,
                 };
                 tx.send(rescale_message).expect("Send RescaleMessage failed");
+                // TODO(lorenzo): need to buzz the rx worker thread, in case it's parked
             });
     }
 }

@@ -194,6 +194,7 @@ impl<A: Allocate> Worker<A> {
 
         // Check if a new worker joined the cluster
         self.rescale();
+        println!("+++++++++++++++ step or park -- after rescale");
 
         {
             // Process channel events. Activate responders.
@@ -267,7 +268,6 @@ impl<A: Allocate> Worker<A> {
         !self.dataflows.borrow().is_empty()
     }
 
-    // TODO don't take progcasters as parameters
     fn rescale(&mut self) {
         // If a new worker joined the cluster, back-fill all allocated channels.
         // Also, if we were selected for bootstrapping the new worker's progress tracker,

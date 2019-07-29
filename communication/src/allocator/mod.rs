@@ -19,7 +19,7 @@ pub mod counters;
 pub mod zero_copy;
 
 use crate::{Data, Push, Pull, Message};
-use std::net::{SocketAddrV4, TcpStream};
+use std::net::TcpStream;
 use crate::rescaling::bootstrap::{BootstrapRecvEndpoint, ProgressUpdatesRange};
 
 /// A proto-allocator, which implements `Send` and can be completed with `build`.

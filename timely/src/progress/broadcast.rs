@@ -137,6 +137,7 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
 impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
     fn has_updates_range(&mut self, range: &ProgressUpdatesRange) -> bool {
+        println!("[has_updates_range] worker_msgs is {:?}", self.worker_msgs.iter().map(|(w,msgs)| (w, msgs.iter().map(|msg| msg.1).collect::<Vec<_>>())).collect::<Vec<_>>());
         self.worker_msgs.get(&range.worker_index)
             .and_then(|msgs| msgs.first().map(|first| (first, msgs.last().unwrap())))
             .and_then(|(first_msg, last_msg)| {
@@ -144,6 +145,7 @@ impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
                 let last_seqno = last_msg.1;
                 // `range.end_seqno` is exclusive: the new worker will read that message
                 // from the direct connection with the other worker.
+                println!("[has_updates_range] first_seqno={} last_seqno={} range={:?}", first_seqno, last_seqno, range);
                 Some(first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno)
             }).unwrap_or(false)
     }
@@ -376,8 +378,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 self.progress_state.update(&message);
 
                 if self.is_recording {
-                    let seqno = *self.counter.borrow();
-                    let tuple = (self.source, seqno, recv_changes.iter().cloned().collect());
+                    let tuple = (source, counter, recv_changes.iter().cloned().collect());
                     self.recorder.append(Message::from_typed(tuple));
                 }
             }

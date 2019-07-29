@@ -314,6 +314,12 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             // TODO(lorenzo) without routing tables..?
             self.peers += threads;
 
+            // make sure all progress messages, including the bootstrap message (signaling last seqno sent),
+            // are received by the new worker process.
+            for send in self.sends.iter() {
+                send.borrow_mut().publish();
+            }
+
             if let Some(addr) = bootstrap_addr {
                 // This worker was selected to bootstrap the progress tracker of the new worker
 
@@ -347,6 +353,8 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                                 break updates_range;
                             } else {
                                 // If the range request could not be satisfied, try to receive new messages from the socket.
+                                println!("loop.receive");
+                                std::thread::sleep(std::time::Duration::from_millis(10));
                                 self.receive();
                             }
                         };

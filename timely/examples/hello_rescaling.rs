@@ -26,7 +26,7 @@ fn main() {
         }
 
         // introduce data and watch!
-        for round in 0..300 {
+        for round in 0..30 {
             if index == 0 {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 input.send(round);
