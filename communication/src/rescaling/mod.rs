@@ -11,6 +11,7 @@ use crate::allocator::zero_copy::initialize::{LogSender, spawn_send_thread, spaw
 use abomonation::Abomonation;
 use std::io::Read;
 use crate::rescaling::bootstrap::encode_write;
+use crate::buzzer::Buzzer;
 
 /// Information to perform the rescaling
 #[derive(Debug)]
@@ -35,13 +36,17 @@ pub struct RescaleMessage {
 ///
 /// The payload of the message is a pair (promise, future) used to setup shared MergeQueue with the new network threads,
 /// as done in the `initialize_networking` function at communication/src/allocator/zero_copy/initialize.rs
-pub fn rescaler(my_index: usize,
-                my_address: String,
-                threads: usize,
-                log_sender: Arc<LogSender>,
-                rescaler_txs: Vec<Sender<RescaleMessage>>)
-{
+pub fn rescaler(
+    my_index: usize,
+    my_address: String,
+    threads: usize,
+    log_sender: Arc<LogSender>,
+    rescaler_txs: Vec<Sender<RescaleMessage>>,
+    buzzer_rxs: Vec<Receiver<Buzzer>>
+) {
     let listener = TcpListener::bind(my_address).expect("Bind failed");
+
+    let buzzers = buzzer_rxs.iter().map(|rx| rx.recv().expect("failed to recv buzzer")).collect::<Vec<_>>();
 
     loop {
         let mut stream = listener.accept().expect("Accept failed").0;
@@ -67,15 +72,17 @@ pub fn rescaler(my_index: usize,
         // Send promises and futures to the workers, so that they can establish MergeQueues with the send/recv network threads
         rescaler_txs
             .iter()
+            .zip(buzzers.iter())
             .zip(worker_promises.into_iter().flatten())
             .zip(worker_futures.into_iter().flatten())
-            .for_each(|((tx, promise), future)| {
+            .for_each(|(((tx, buzzer), promise), future)| {
                 let rescale_message = RescaleMessage {
                     promise,
                     future,
                     bootstrap_addr,
                 };
                 tx.send(rescale_message).expect("Send RescaleMessage failed");
+                buzzer.buzz();
                 // TODO(lorenzo): need to buzz the rx worker thread, in case it's parked
             });
     }

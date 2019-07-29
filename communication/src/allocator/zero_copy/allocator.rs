@@ -18,6 +18,7 @@ use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
 use crate::rescaling::RescaleMessage;
 use crate::rescaling::bootstrap::{BootstrapRecvEndpoint, ProgressUpdatesRange};
+use crate::buzzer::Buzzer;
 
 /// Builds an instance of a TcpAllocator.
 ///
@@ -34,6 +35,9 @@ pub struct TcpBuilder<A: AllocateBuilder> {
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
+
+    // TODO(lorenzo) explain
+    buzzer_tx: Sender<Buzzer>,
 
     // TODO(lorenzo) explain
     bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
@@ -57,6 +61,7 @@ pub fn new_vector<A: AllocateBuilder>(
     my_process: usize,
     processes: usize,
     rescaler_rxs: Vec<Receiver<RescaleMessage>>,
+    buzzer_txs: Vec<Sender<Buzzer>>,
     bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>)
 -> (Vec<TcpBuilder<A>>,
     Vec<Vec<Sender<MergeQueue>>>,
@@ -74,9 +79,10 @@ pub fn new_vector<A: AllocateBuilder>(
         .zip(worker_promises)
         .zip(worker_futures)
         .zip(rescaler_rxs)
+        .zip(buzzer_txs)
         .zip(bootstrap_recv_endpoints)
         .enumerate()
-        .map(|(index, ((((inner, promises), futures), rescaler_rx), bootstrap_recv_endpoint))| {
+        .map(|(index, (((((inner, promises), futures), rescaler_rx), buzzer_tx), bootstrap_recv_endpoint))| {
             TcpBuilder {
                 inner,
                 index: my_process * threads + index,
@@ -84,6 +90,7 @@ pub fn new_vector<A: AllocateBuilder>(
                 promises,
                 futures,
                 rescaler_rx,
+                buzzer_tx,
                 bootstrap_recv_endpoint,
             }})
         .collect();
@@ -99,6 +106,8 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
         let recvs = self.promises.into_iter().map(fulfill_promise).collect();
 
         let sends = self.futures.into_iter().map(extract_future).collect();
+
+        self.buzzer_tx.send(Buzzer::new()).expect("failed to send buzzer to rescaler thread");
 
         TcpAllocator {
             inner: self.inner.build(),
@@ -158,6 +167,8 @@ pub struct TcpAllocator<A: Allocate> {
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
+
+    //
 
     // TODO(lorenzo) explain
     bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,

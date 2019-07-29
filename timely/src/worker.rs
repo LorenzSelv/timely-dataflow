@@ -194,7 +194,7 @@ impl<A: Allocate> Worker<A> {
 
         // Check if a new worker joined the cluster
         self.rescale();
-        println!("+++++++++++++++ step or park -- after rescale");
+        // println!("+++++++++++++++ step or park -- after rescale");
 
         {
             // Process channel events. Activate responders.
@@ -232,9 +232,11 @@ impl<A: Allocate> Worker<A> {
             self.logging().as_mut().map(|l| l.log(crate::logging::ParkEvent::park(duration)));
             self.logging.borrow_mut().flush();
 
+            println!("########################################### PARKED!");
             self.allocator
                 .borrow()
                 .await_events(duration);
+            println!("########################################### UN-PARKED!");
 
             // Log return from unpark.
             self.logging().as_mut().map(|l| l.log(crate::logging::ParkEvent::unpark()));

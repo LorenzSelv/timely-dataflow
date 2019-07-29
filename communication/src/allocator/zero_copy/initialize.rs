@@ -63,10 +63,8 @@ pub fn initialize_networking(
 
     let log_sender_clone = log_sender.clone();
 
-    let (rescaler_txs, rescaler_rxs) =
-        (0..threads)
-            .map(|_| std::sync::mpsc::channel())
-            .unzip();
+    let (rescaler_txs, rescaler_rxs) = (0..threads).map(|_| std::sync::mpsc::channel()).unzip();
+    let (buzzer_txs, buzzer_rxs)     = (0..threads).map(|_| std::sync::mpsc::channel()).unzip();
 
     // TODO maybe keep the handle of the acceptor thread?
     std::thread::spawn(move || {
@@ -74,11 +72,12 @@ pub fn initialize_networking(
                                    my_address,
                                    threads,
                                    log_sender_clone,
-                                   rescaler_txs);
+                                   rescaler_txs,
+                                   buzzer_rxs);
     });
 
     let process_allocators = crate::allocator::process::Process::new_vector(threads);
-    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, rescaler_rxs, bootstrap_recv_endpoints);
+    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, rescaler_rxs, buzzer_txs, bootstrap_recv_endpoints);
 
     let mut promises_iter = promises.into_iter();
     let mut futures_iter = futures.into_iter();
