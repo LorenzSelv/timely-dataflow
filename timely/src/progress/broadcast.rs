@@ -401,7 +401,7 @@ pub trait ProgcasterServerHandle {
 
     /// Return the encoded (abomonation::encode) vector of updates corresponding
     /// to all updates in the requested message range range.
-    fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Vec<u8>;
+    fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Option<Vec<u8>>;
 
     /// Return a boxed clone of this handle.
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle>;
@@ -470,7 +470,7 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
         progcaster.progress_state.encode()
     }
 
-    fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Vec<u8> {
+    fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Option<Vec<u8>> {
         let mut progcaster = self.borrow_mut();
 
         assert!(progcaster.is_recording);
@@ -479,14 +479,18 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
         // pull from the channel until we do (stashing changes for later).
         let mut changes_stash = ChangeBatch::new();
 
-        while !progcaster.recorder.has_updates_range(range) {
-            // TODO(lorenzo): need to refresh puller here by calling allocator.receive()
+        if !progcaster.recorder.has_updates_range(range) {
+            // try to pull for more progress messages
             progcaster.pull_loop(&mut changes_stash);
+            // if we pulled any updates above, stash them for later
+            progcaster.pulled_changes_stash.extend(changes_stash.drain());
         }
 
-        progcaster.pulled_changes_stash.extend(changes_stash.drain());
-
-        progcaster.recorder.get_updates_range(range)
+        if progcaster.recorder.has_updates_range(range) {
+            Some(progcaster.recorder.get_updates_range(range))
+        } else {
+            None
+        }
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {

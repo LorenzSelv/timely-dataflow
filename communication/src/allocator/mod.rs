@@ -19,8 +19,8 @@ pub mod counters;
 pub mod zero_copy;
 
 use crate::{Data, Push, Pull, Message};
-use std::net::SocketAddrV4;
-use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
+use std::net::{SocketAddrV4, TcpStream};
+use crate::rescaling::bootstrap::{BootstrapRecvEndpoint, ProgressUpdatesRange};
 
 /// A proto-allocator, which implements `Send` and can be completed with `build`.
 ///
@@ -48,9 +48,17 @@ pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
 impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
 /// TODO(lorenzo) doc
-pub trait BootstrapClosure : FnOnce(usize, SocketAddrV4) + 'static {}
-impl <F: FnOnce(usize, SocketAddrV4) + 'static> BootstrapClosure for F {}
+pub trait BootstrapSendStateClosure : FnOnce(&mut TcpStream) {}
+impl <F: FnOnce(&mut TcpStream)> BootstrapSendStateClosure for F {}
 
+/// TODO(lorenzo) doc
+/// TODO FnOnce?
+pub trait BootstrapGetUpdatesRangeClosure : Fn(&ProgressUpdatesRange) -> Option<Vec<u8>> {}
+impl <F: Fn(&ProgressUpdatesRange) -> Option<Vec<u8>>> BootstrapGetUpdatesRangeClosure for F {}
+
+/// TODO(lorenzo) doc
+pub trait BootstrapDoneClosure : FnOnce() {}
+impl <F: FnOnce()> BootstrapDoneClosure for F {}
 
 /// A type capable of allocating channels.
 ///
@@ -81,8 +89,11 @@ pub trait Allocate {
     /// The `ExchangePusher` relies on the modulo operator, and thus on a constant number of peers
     /// to maintain correctness. This needs to be updated to use a routing table, or to require the usage
     /// of Megaphone that keeps the routing table for us.
-    /// TODO(lorenzo): explain bootstrap closure
-    fn rescale(&mut self, _bootstrap: impl BootstrapClosure) { /* nop by default */ }
+    /// TODO(lorenzo): explain bootstrap closures
+    fn rescale(&mut self,
+               _: impl BootstrapSendStateClosure,
+               _: impl BootstrapGetUpdatesRangeClosure,
+               _: impl BootstrapDoneClosure) { /* nop by default */ }
 
     /// A shared queue of communication events with channel identifier.
     ///

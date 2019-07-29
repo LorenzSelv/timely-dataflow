@@ -1,4 +1,5 @@
 //! Zero-copy allocator based on TCP.
+use std::io::{Read, Write};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::{VecDeque, HashMap};
@@ -9,14 +10,14 @@ use bytes::arc::Bytes;
 use crate::networking::MessageHeader;
 
 use crate::{Allocate, Message, Data, Pull};
-use crate::allocator::{AllocateBuilder, OnNewPushFn, BootstrapClosure};
+use crate::allocator::{AllocateBuilder, OnNewPushFn, BootstrapSendStateClosure, BootstrapGetUpdatesRangeClosure, BootstrapDoneClosure};
 use crate::allocator::Event;
 use crate::allocator::canary::Canary;
 
 use super::bytes_exchange::{BytesPull, SendEndpoint, MergeQueue};
 use super::push_pull::{Pusher, PullerInner};
 use crate::rescaling::RescaleMessage;
-use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
+use crate::rescaling::bootstrap::{BootstrapRecvEndpoint, ProgressUpdatesRange};
 
 /// Builds an instance of a TcpAllocator.
 ///
@@ -258,7 +259,11 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     ///
     /// The number of peers (total number of worker threads in the computation) is also updated.
     /// As a result, you should *not* rely on the number of peers to remain unchanged.
-    fn rescale(&mut self, bootstrap_closure: impl BootstrapClosure) {
+    fn rescale(&mut self,
+               send_state_clj: impl BootstrapSendStateClosure,
+               get_updates_range_clj: impl BootstrapGetUpdatesRangeClosure,
+               done_clj: impl BootstrapDoneClosure
+    ) {
         // try receiving from the rescale thread - did any new worker process initiated a connection?
         if let Ok(rescale_message) = self.rescaler_rx.try_recv() {
 
@@ -310,13 +315,51 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             self.peers += threads;
 
             if let Some(addr) = bootstrap_addr {
-                // This worker was selected to bootstrap the progress tracker of the new worker,
-                // spawn the bootstrap thread
+                // This worker was selected to bootstrap the progress tracker of the new worker
 
-                // cannot send some of the progcaster members (Rc stuff) to other thread safely,
-                // need to call the closure directly
-                // let _handle = std::thread::spawn(move || bootstrap_closure(addr));
-                bootstrap_closure(self.index, addr);
+                // setup connection to new worker
+                let mut tcp_stream = crate::rescaling::bootstrap::start_connection(self.index(), addr);
+
+                // send the encoded progcaster state, for each progcaster
+                send_state_clj(&mut tcp_stream);
+
+                // handle range requests
+                let mut request_buf = vec![0_u8; std::mem::size_of::<ProgressUpdatesRange>()];
+
+                loop {
+                    let read = tcp_stream.read(&mut request_buf[..]).expect("read error");
+
+                    // loop until the client closes the connection
+                    // TODO maybe send some close message instead
+                    if read == 0 {
+                        println!("bootstrap worker server done!");
+                        break;
+                    } else {
+                        assert_eq!(read, request_buf.len());
+
+                        let (range_req, remaining) = unsafe { abomonation::decode::<ProgressUpdatesRange>(&mut request_buf[..]) }.expect("decode error");
+                        assert_eq!(remaining.len(), 0);
+
+                        println!("got update_range request: {:?}", range_req);
+
+                        let updates_range = loop {
+                            if let Some(updates_range) = get_updates_range_clj(range_req) {
+                                break updates_range;
+                            } else {
+                                // If the range request could not be satisfied, try to receive new messages from the socket.
+                                self.receive();
+                            }
+                        };
+
+                        // write the size of the encoded updates_range
+                        crate::rescaling::bootstrap::encode_write(&mut tcp_stream, &updates_range.len());
+
+                        // write the updates_range
+                        tcp_stream.write(&updates_range[..]).expect("failed to send range_updates to target worker");
+                    }
+                }
+
+                done_clj();
             }
         }
     }
@@ -324,7 +367,6 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     // Perform preparatory work, most likely reading binary buffers from self.recv.
     #[inline(never)]
     fn receive(&mut self) {
-
         // Check for channels whose `Puller` has been dropped.
         let mut canaries = self.canaries.borrow_mut();
         for dropped_channel in canaries.drain(..) {

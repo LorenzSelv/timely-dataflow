@@ -31,6 +31,8 @@ use timely_communication::{Message, Allocate};
 use std::rc::Rc;
 use core::cell::RefCell;
 use std::time::Duration;
+use std::net::TcpStream;
+use timely_communication::rescaling::bootstrap::ProgressUpdatesRange;
 
 fn main() {
 
@@ -58,7 +60,7 @@ fn main() {
             std::thread::sleep(Duration::from_secs(2));
 
             // TODO(lorenzo) example is probably broken now
-            allocator.rescale(|_,_| {});
+            allocator.rescale(|_: &mut TcpStream| {}, |_: &ProgressUpdatesRange| { None }, || {});
 
             let mut senders = senders2.borrow_mut();
 

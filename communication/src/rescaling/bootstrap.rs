@@ -2,7 +2,7 @@
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::net::{SocketAddrV4, TcpStream, TcpListener};
-use crate::networking::recv_handshake;
+use crate::networking::{recv_handshake, send_handshake};
 use abomonation::Abomonation;
 use std::io::{Read, Write};
 
@@ -63,6 +63,23 @@ impl BootstrapRecvEndpoint {
     /// Return the worker index of the bootstrap server
     pub fn get_server_index(&self) -> usize {
         self.server_index
+    }
+}
+
+/// TODO
+pub fn start_connection(my_index: usize, address: SocketAddrV4) -> TcpStream {
+    loop {
+        match TcpStream::connect(address) {
+            Ok(mut stream) => {
+                send_handshake(&mut stream, my_index);
+                println!("[bootstrap server -- W{}] connected to new worker at {}", my_index, address);
+                break stream
+            },
+            Err(error) => {
+                println!("[bootstap server -- W{}] error connecting to new worker at {}: {}", my_index, address, error);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            },
+        }
     }
 }
 

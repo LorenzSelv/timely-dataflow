@@ -18,6 +18,8 @@ use crate::progress::operate::Operate;
 use crate::progress::broadcast::{ProgcasterServerHandle, ProgcasterClientHandle};
 use crate::dataflow::scopes::Child;
 use crate::logging::TimelyLogger;
+use std::net::TcpStream;
+use timely_communication::rescaling::bootstrap::ProgressUpdatesRange;
 
 
 /// Methods provided by the root Worker.
@@ -190,17 +192,12 @@ impl<A: Allocate> Worker<A> {
     /// ```
     pub fn step_or_park(&mut self, duration: Option<Duration>) -> bool {
 
-        {   // Process channel events. Activate responders.
-            let mut allocator = self.allocator.borrow_mut();
+        // Check if a new worker joined the cluster
+        self.rescale();
 
-            // If a new worker joined the cluster, back-fill all allocated channels.
-            // Also, if we were selected for bootstrapping the new worker's progress tracker,
-            // then the bootstrap_worker_server closure will be invoked.
-            let handles = self.progcaster_server_handles.clone();
-            // TODO allocator.publish() as part of the bootstrapClosure ?
-            // TODO allocator.receive() as part of the bootstrapClosure
-            allocator.rescale(|my_index, addr| crate::progress::rescaling::bootstrap_worker_server(my_index, addr, handles));
-            println!("after rescale call");
+        {
+            // Process channel events. Activate responders.
+            let mut allocator = self.allocator.borrow_mut();
 
             allocator.receive();
 
@@ -268,6 +265,52 @@ impl<A: Allocate> Worker<A> {
         self.logging.borrow_mut().flush();
         self.allocator.borrow_mut().release();
         !self.dataflows.borrow().is_empty()
+    }
+
+    // TODO don't take progcasters as parameters
+    fn rescale(&mut self) {
+        // If a new worker joined the cluster, back-fill all allocated channels.
+        // Also, if we were selected for bootstrapping the new worker's progress tracker,
+        // then the bootstrap_worker_server closure will be invoked.
+        let progcasters1 = self.progcaster_server_handles.clone();
+        let progcasters2 = self.progcaster_server_handles.clone();
+        let progcasters3 = self.progcaster_server_handles.clone();
+
+        let send_state_clj = move |mut tcp_stream: &mut TcpStream| {
+
+            use std::io::Write;
+            use crate::communication::rescaling::bootstrap::encode_write;
+
+            // write how many progcasters' state we are going to send
+            encode_write(&mut tcp_stream, &progcasters1.len());
+
+            for (channel_id, progcaster) in progcasters1.iter() {
+                let progress_state = progcaster.get_progress_state();
+                progcaster.start_recording();
+
+                // (1) write channel_id
+                encode_write(&mut tcp_stream, channel_id);
+
+                // (2) write size of the state in bytes
+                encode_write(&mut tcp_stream, &progress_state.len());
+
+                // (3) write the encoded state
+                tcp_stream.write(&progress_state[..]).expect("write error");
+            }
+        };
+
+        let get_updates_range_clj = move |range_req: &ProgressUpdatesRange| {
+            let progcaster = &progcasters2.get(&range_req.channel_id).expect("progcaster not found");
+            progcaster.get_updates_range(range_req)
+        };
+
+        let done_clj = move || {
+            for progcaster in progcasters3.values() {
+                progcaster.stop_recording();
+            }
+        };
+
+        self.allocator.borrow_mut().rescale(send_state_clj, get_updates_range_clj, done_clj);
     }
 
     /// Calls `self.step()` as long as `func` evaluates to true.
