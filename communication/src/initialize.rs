@@ -69,46 +69,44 @@ impl Configuration {
         opts.parse(args)
             .map_err(|e| format!("{:?}", e))
             .map(|matches| {
+                let threads = matches.opt_str("w").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
+                let process = matches.opt_str("p").map(|x| x.parse().unwrap_or(0)).unwrap_or(0);
+                let processes = matches.opt_str("n").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
+                let join = matches.opt_str("join").map(|x| x.parse::<usize>().unwrap());
+                let report = matches.opt_present("report");
 
-            // let mut config = Configuration::new(1, 0, Vec::new());
-            let threads = matches.opt_str("w").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
-            let process = matches.opt_str("p").map(|x| x.parse().unwrap_or(0)).unwrap_or(0);
-            let processes = matches.opt_str("n").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
-            let join = matches.opt_str("join").map(|x| x.parse::<usize>().unwrap());
-            let report = matches.opt_present("report");
+                assert!(process < processes);
 
-            assert!(process < processes);
-
-            if processes > 1 {
-                let mut addresses = Vec::new();
-                if let Some(hosts) = matches.opt_str("h") {
-                    let reader = ::std::io::BufReader::new(::std::fs::File::open(hosts.clone()).unwrap());
-                    for x in reader.lines().take(processes) {
-                        addresses.push(x.unwrap());
+                if processes > 1 {
+                    let mut addresses = Vec::new();
+                    if let Some(hosts) = matches.opt_str("h") {
+                        let reader = ::std::io::BufReader::new(::std::fs::File::open(hosts.clone()).unwrap());
+                        for x in reader.lines().take(processes) {
+                            addresses.push(x.unwrap());
+                        }
+                        if addresses.len() < processes {
+                            panic!("could only read {} addresses from {}, but -n: {}", addresses.len(), hosts, processes);
+                        }
                     }
-                    if addresses.len() < processes {
-                        panic!("could only read {} addresses from {}, but -n: {}", addresses.len(), hosts, processes);
+                    else {
+                        for index in 0..processes {
+                            addresses.push(format!("localhost:{}", 2101 + index));
+                        }
+                    }
+
+                    assert!(processes == addresses.len());
+                    Configuration::Cluster {
+                        threads,
+                        process,
+                        addresses,
+                        report,
+                        join,
+                        log_fn: Box::new(|_| None),
                     }
                 }
-                else {
-                    for index in 0..processes {
-                        addresses.push(format!("localhost:{}", 2101 + index));
-                    }
-                }
-
-                assert!(processes == addresses.len());
-                Configuration::Cluster {
-                    threads,
-                    process,
-                    addresses,
-                    report,
-                    join,
-                    log_fn: Box::new(|_| None),
-                }
-            }
-            else if threads > 1 { Configuration::Process(threads) }
-            else { Configuration::Thread }
-        })
+                else if threads > 1 { Configuration::Process(threads) }
+                else { Configuration::Thread }
+            })
     }
 
     /// Attempts to assemble the described communication infrastructure.
