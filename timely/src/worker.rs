@@ -549,6 +549,7 @@ impl<A: Allocate> Worker<A> {
             //         which are larger than last_seqno_sent but will not be pushed in the new channel
             //         possible workaround -- since each step round send at only one progress message => last_seqno_sent+1 is guaranteed
 
+            // TODO(lorenzo) each worker is asking for the same ranges.. forward request only once
             for progcaster in self.progcaster_client_handles.values() {
                 println!("[W{}] getting ranges!", self.index());
 
