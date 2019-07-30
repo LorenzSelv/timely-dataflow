@@ -69,6 +69,9 @@ pub trait Allocate {
     fn index(&self) -> usize;
     /// The number of workers in the communication group.
     fn peers(&self) -> usize;
+    /// The number of workers in the initial communication group.
+    /// Defaults to peers, only in cluster mode with rescaling operations will change.
+    fn init_peers(&self) -> usize { self.peers() }
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
          where F: OnNewPushFn<T>;

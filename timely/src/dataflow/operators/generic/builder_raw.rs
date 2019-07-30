@@ -25,18 +25,20 @@ use crate::dataflow::operators::generic::operator_info::OperatorInfo;
 pub struct OperatorShape {
     name: String,   // A meaningful name for the operator.
     notify: bool,   // Does the operator require progress notifications.
-    peers: usize,   // The total number of workers in the computation. // TODO(lorenzo) THIS SHOULD BE UPDATED !! or maybe not, used only at initialization in `get_internal_summaries`
+    init_peers: usize,   // The total number of workers in the computation when it was first started.
+                         // This will not match the actual number of peers in the computation if a rescaling operation
+                         // has occurred. But this is fine, as it is used only to initialize initial capabilities of scopes.
     inputs: usize,  // The number of input ports.
     outputs: usize, // The number of output ports.
 }
 
 /// Core data for the structure of an operator, minus scope and logic.
 impl OperatorShape {
-    fn new(name: String, peers: usize) -> Self {
+    fn new(name: String, init_peers: usize) -> Self {
         OperatorShape {
             name,
             notify: true,
-            peers,
+            init_peers,
             inputs: 0,
             outputs: 0,
         }
@@ -72,14 +74,14 @@ impl<G: Scope> OperatorBuilder<G> {
         let index = scope.allocate_operator_index();
         let mut address = scope.addr();
         address.push(index);
-        let peers = scope.peers();
+        let init_peers = scope.init_peers();
 
         OperatorBuilder {
             scope,
             index,
             global,
             address,
-            shape: OperatorShape::new(name, peers),
+            shape: OperatorShape::new(name, init_peers),
             summary: vec![],
         }
     }
@@ -240,7 +242,7 @@ where
             .borrow_mut()
             .internals
             .iter_mut()
-            .for_each(|output| output.update(Default::default(), self.shape.peers as i64));
+            .for_each(|output| output.update(Default::default(), self.shape.init_peers as i64));
             // TODO(lorenzo) important
 
         (self.summary.clone(), self.shared_progress.clone())

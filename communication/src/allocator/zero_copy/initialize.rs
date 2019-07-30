@@ -46,6 +46,7 @@ pub fn initialize_networking(
     addresses: Vec<String>,
     my_index: usize,
     threads: usize,
+    init_processes: usize,
     bootstrap_info: Option<(usize, SocketAddrV4)>,
     bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>,
     noisy: bool,
@@ -77,7 +78,7 @@ pub fn initialize_networking(
     });
 
     let process_allocators = crate::allocator::process::Process::new_vector(threads);
-    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, rescaler_rxs, buzzer_txs, bootstrap_recv_endpoints);
+    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, init_processes, rescaler_rxs, buzzer_txs, bootstrap_recv_endpoints);
 
     let mut promises_iter = promises.into_iter();
     let mut futures_iter = futures.into_iter();

@@ -33,6 +33,8 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     futures:   Vec<Receiver<MergeQueue>>,  // to receive queues to each network thread.
     promises:   Vec<Sender<MergeQueue>>,    // to send queues from each network thread.
 
+    init_peers:  usize,   // number of peer allocators in the initial configuration.
+
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
 
@@ -60,6 +62,7 @@ pub fn new_vector<A: AllocateBuilder>(
     allocators: Vec<A>,
     my_process: usize,
     processes: usize,
+    init_processes: usize,
     rescaler_rxs: Vec<Receiver<RescaleMessage>>,
     buzzer_txs: Vec<Sender<Buzzer>>,
     bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>)
@@ -87,6 +90,7 @@ pub fn new_vector<A: AllocateBuilder>(
                 inner,
                 index: my_process * threads + index,
                 peers: threads * processes,
+                init_peers: threads * init_processes,
                 promises,
                 futures,
                 rescaler_rx,
@@ -113,6 +117,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             inner: self.inner.build(),
             index: self.index,
             peers: self.peers,
+            init_peers: self.init_peers,
             canaries: Rc::new(RefCell::new(Vec::new())),
             staged: Vec::new(),
             sends,
@@ -152,12 +157,13 @@ impl<T,                  F: FnMut(Box<Pusher<Message<T>, MergeQueue>>) + 'static
 /// A TCP-based allocator for inter-process communication.
 pub struct TcpAllocator<A: Allocate> {
 
-    inner:      A,                                  // A non-serialized inner allocator for process-local peers.
+    inner:      A,                          // A non-serialized inner allocator for process-local peers.
 
-    index:      usize,                              // number out of peers
-    peers:      usize,                              // number of peer allocators (for typed channel allocation).
+    index:      usize,                      // number out of peers
+    peers:      usize,                      // number of peer allocators (for typed channel allocation).
+    init_peers: usize,                      // number of peer allocators in the initial configuration (before any rescaling operation)
 
-    staged:     Vec<Bytes>,                         // staging area for incoming Bytes
+    staged:     Vec<Bytes>,                 // staging area for incoming Bytes
     canaries:   Rc<RefCell<Vec<usize>>>,
 
     // sending, receiving, and responding to binary buffers.
@@ -167,8 +173,6 @@ pub struct TcpAllocator<A: Allocate> {
 
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
-
-    //
 
     // TODO(lorenzo) explain
     bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
@@ -181,6 +185,7 @@ pub struct TcpAllocator<A: Allocate> {
 impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
+    fn init_peers(&self) -> usize { self.init_peers }
     fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_push: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {

@@ -36,8 +36,11 @@ pub enum Configuration {
         addresses: Vec<String>,
         /// Verbosely report connection process
         report: bool,
-        /// Whether the current is joining the cluster
+        /// Whether the current is joining the cluster, and the bootstrap server worker index
         join: Option<usize>,
+        /// The number of processes that were in the initial configuration.
+        /// If no rescaling operation has occurred, it's equal to addresses.len().
+        init_processes: usize,
         /// Closure to create a new logger for a communication thread
         log_fn: Box<Fn(CommunicationSetup) -> Option<Logger<CommunicationEvent, CommunicationSetup>> + Send + Sync>,
     }
@@ -52,9 +55,10 @@ impl Configuration {
         let mut opts = getopts::Options::new();
         opts.optopt("w", "threads", "number of per-process worker threads", "NUM");
         opts.optopt("p", "process", "identity of this process", "IDX");
-        opts.optopt("n", "processes", "number of processes", "NUM");
+        opts.optopt("n", "processes", "initial number of processes", "NUM");
         opts.optopt("h", "hostfile", "text file whose lines are process addresses", "FILE");
-        opts.optopt("j", "join", "join the cluster with worker NUM as bootstrap server", "NUM");
+        opts.optopt("j", "join", "join the cluster with worker NUM as the bootstrap server", "NUM");
+        opts.optopt("", "nn", "if joining the cluster (-j), number of processes after this process has been added", "NUM");
         opts.optflag("r", "report", "reports connection progress");
 
         opts
@@ -66,14 +70,26 @@ impl Configuration {
     pub fn from_args<I: Iterator<Item=String>>(args: I) -> Result<Configuration,String> {
         let opts = Configuration::options();
 
+        // TODO(lorenzo) need to distinguish between the initial shape of the cluster vs the
+        //               shape of the cluster after rescaling (i.e. what `n` should be).
+        //               - the initial `n` (-n)   is needed to initialize the progress tracker capabilities.
+        //               - the current `n` (--nn) is needed to know who to setup connection to.
         opts.parse(args)
             .map_err(|e| format!("{:?}", e))
             .map(|matches| {
                 let threads = matches.opt_str("w").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
                 let process = matches.opt_str("p").map(|x| x.parse().unwrap_or(0)).unwrap_or(0);
-                let processes = matches.opt_str("n").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
+                let init_processes = matches.opt_str("n").map(|x| x.parse().unwrap_or(1)).unwrap_or(1);
                 let join = matches.opt_str("join").map(|x| x.parse::<usize>().unwrap());
+                let new_processes = matches.opt_str("nn").map(|x| x.parse::<usize>().unwrap());
                 let report = matches.opt_present("report");
+
+                assert!((join.is_some() && new_processes.is_some()) ||
+                        (join.is_none() && new_processes.is_none()),
+                        "if rescaling, both -j BOOTSTRAP_SERVER_WORKER_INDEX and -nn NEW_NUM_PROCESSES must be supplied");
+
+                // if joining the cluster, `new_processes` has priority and `init_processes` is only used to initialize the progress tracker
+                let processes = new_processes.unwrap_or(init_processes);
 
                 assert!(process < processes);
 
@@ -101,6 +117,7 @@ impl Configuration {
                         addresses,
                         report,
                         join,
+                        init_processes,
                         log_fn: Box::new(|_| None),
                     }
                 }
@@ -118,7 +135,7 @@ impl Configuration {
             Configuration::Process(threads) => {
                 Ok((Process::new_vector(threads).into_iter().map(|x| GenericBuilder::Process(x)).collect(), Box::new(())))
             },
-            Configuration::Cluster { threads, process, addresses, report, join, log_fn } => {
+            Configuration::Cluster { threads, process, addresses, report, join, init_processes, log_fn } => {
 
                 let (bootstrap_info, bootstrap_recv_endpoints) =
                     if let Some(server_index) = join {
@@ -147,7 +164,7 @@ impl Configuration {
                     };
 
 
-                match initialize_networking(addresses, process, threads, bootstrap_info, bootstrap_recv_endpoints, report, log_fn) {
+                match initialize_networking(addresses, process, threads, init_processes, bootstrap_info, bootstrap_recv_endpoints, report, log_fn) {
                     Ok((stuff, guard)) => {
                         let builders = stuff.into_iter().map(|x| GenericBuilder::ZeroCopy(x)).collect();
                         Ok((builders, Box::new(guard)))

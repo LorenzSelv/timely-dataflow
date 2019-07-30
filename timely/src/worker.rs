@@ -31,6 +31,9 @@ pub trait AsWorker : Scheduler {
     fn index(&self) -> usize;
     /// Number of peer workers.
     fn peers(&self) -> usize;
+    /// Number of peer workers in the initial configuration
+    /// (differs from `peers()` only if a rescaling operation has occurred).
+    fn init_peers(&self) -> usize;
     /// Allocates a new channel from a supplied identifier and address.
     ///
     /// The identifier is used to identify the underlying channel and route
@@ -87,6 +90,7 @@ pub struct Worker<A: Allocate> {
 impl<A: Allocate> AsWorker for Worker<A> {
     fn index(&self) -> usize { self.allocator.borrow().index() }
     fn peers(&self) -> usize { self.allocator.borrow().peers() }
+    fn init_peers(&self) -> usize { self.allocator.borrow().init_peers() }
     fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
         where F: OnNewPushFn<D>
     {
