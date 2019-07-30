@@ -14,7 +14,10 @@ use abomonation::Abomonation;
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProgressState<T: Timestamp> {
     /// compacted ChangeBatch: all updates ever sent/recved accumulated
-    change_batch: ChangeBatch<(Location,T)>,
+    acc_updates: ChangeBatch<(Location, T)>,
+
+    /// delta ChangeBatch: cleared every time progcaster.recv() is called
+    delta_updates: ChangeBatch<(Location, T)>,
 
     /// hashmap of (worker_index) -> SeqNo
     ///                 ^source in the message
@@ -27,7 +30,8 @@ impl<T: Timestamp> ProgressState<T> {
 
     fn new() -> Self {
         ProgressState {
-            change_batch: ChangeBatch::new(),
+            acc_updates: ChangeBatch::new(),
+            delta_updates: ChangeBatch::new(),
             worker_seqno: HashMap::new(),
         }
     }
@@ -45,7 +49,7 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         // We encode the change batch and the worker_seqno separately, one after the other.
         let mut buf = Vec::new();
         // encode change_batch
-        unsafe { abomonation::encode(&self.change_batch, &mut buf) }.expect("encode error");
+        unsafe { abomonation::encode(&self.acc_updates, &mut buf) }.expect("encode error");
         // encode worker_seqno
         let worker_seqno_vec: Vec<(usize,usize)> = self.worker_seqno.iter().map(|(x,y)| (*x, *y)).collect();
         unsafe { abomonation::encode(&worker_seqno_vec, &mut buf) }.expect("encode error");
@@ -59,7 +63,8 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let worker_seqno: HashMap<usize,usize> = typed.iter().map(|&x| x).collect();
         assert_eq!(remaining.len(), 0);
         ProgressState {
-            change_batch,
+            acc_updates: change_batch.clone(),
+            delta_updates: change_batch, // initially, all updates are new and should be `recv()`ed
             worker_seqno,
         }
     }
@@ -86,7 +91,8 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
 
         // apply all updates in the message
         for (pointstamp, delta) in progress_vec.into_iter() {
-            self.change_batch.update(pointstamp.clone(), *delta);
+            self.acc_updates.update(pointstamp.clone(), *delta);
+            self.delta_updates.update(pointstamp.clone(), *delta);
         }
     }
 
@@ -99,8 +105,13 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         assert_eq!(remaining.len(), 0);
 
         for (pointstamp, delta) in updates_range.into_iter() {
-            self.change_batch.update(pointstamp.clone(), *delta);
+            self.acc_updates.update(pointstamp.clone(), *delta);
+            self.delta_updates.update(pointstamp.clone(), *delta);
         }
+    }
+
+    fn drain_delta_updates(&mut self) -> std::vec::Drain<((Location, T), i64)> {
+        self.delta_updates.drain()
     }
 }
 
@@ -203,8 +214,6 @@ pub struct Progcaster<T:Timestamp> {
     recorder: ProgressRecorder<T>,
     is_recording: bool,
 
-    pulled_changes_stash: ChangeBatch<(Location, T)>,
-
     logging: Option<Logger>,
 }
 
@@ -265,7 +274,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
             logging,
             progress_state: ProgressState::new(),
             progress_msg_stash: Vec::new(),
-            pulled_changes_stash: ChangeBatch::new(),
             recorder: ProgressRecorder::new(),
             is_recording: false, // not recording initially
         }
@@ -330,15 +338,15 @@ impl<T:Timestamp+Send> Progcaster<T> {
     }
 
     /// Receives pointstamp changes from all workers.
-    pub fn recv(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
-        // First drain all stashed changes that we already pulled, but not exposed yet.
-        changes.extend(self.pulled_changes_stash.drain());
+    pub fn recv(&mut self, changes: &mut ChangeBatch<(Location, T)>) {
 
         // Then try to pull more changes from the channel.
-        self.pull_loop(&mut changes);
+        self.pull_loop();
+
+        changes.extend(self.progress_state.drain_delta_updates());
     }
 
-    fn pull_loop(&mut self, changes: &mut ChangeBatch<(Location, T)>) {
+    fn pull_loop(&mut self) {
         while let Some(message) = self.puller.pull() {
 
             let source = message.0;
@@ -365,11 +373,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
             // received by the bootstrap server is ahead of the direct TCP connection
             // with that worker. In that case we should not re-apply the updates.
             if !is_duplicate {
-
-                // We clone rather than drain to avoid deserialization.
-                for &(ref update, delta) in recv_changes.iter() {
-                    changes.update(update.clone(), delta);
-                }
 
                 self.progress_state.update(&message, self.source);
 
@@ -463,7 +466,7 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
 
     fn get_progress_state(&self) -> Vec<u8> {
         let mut progcaster = self.borrow_mut();
-        progcaster.progress_state.change_batch.compact();
+        progcaster.progress_state.acc_updates.compact();
         progcaster.progress_state.encode()
     }
 
@@ -472,15 +475,9 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
 
         assert!(progcaster.is_recording);
 
-        // we might not have the requested range yet! If that's the case, we should
-        // pull from the channel until we do (stashing changes for later).
-        let mut changes_stash = ChangeBatch::new();
-
         if !progcaster.recorder.has_updates_range(range) {
             // try to pull for more progress messages
-            progcaster.pull_loop(&mut changes_stash);
-            // if we pulled any updates above, stash them for later
-            progcaster.pulled_changes_stash.extend(changes_stash.drain());
+            progcaster.pull_loop();
         }
 
         if progcaster.recorder.has_updates_range(range) {
@@ -540,9 +537,8 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
             } else {
                 // Other workers are still making progress, so they might send more progress updates
                 // before all workers get the chance to send their init_message.
-                // If that's the case we need to stash the progress updates
-                let tuple = (worker_index, msg_seqno, recv_changes.iter().cloned().collect());
-                progcaster.progress_msg_stash.push(Message::from_typed(tuple));
+                // If that's the case we need to update the progress_state
+                progcaster.progress_state.update(message, progcaster.source);
             }
 
             if worker_todo.is_empty() { break }
