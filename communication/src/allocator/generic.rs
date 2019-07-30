@@ -48,6 +48,17 @@ impl Generic {
             &Generic::ZeroCopy(ref z) => z.peers(),
         }
     }
+
+    /// The initial number of workers.
+    pub fn init_peers(&self) -> usize {
+        match self {
+            &Generic::Thread(ref t) => t.init_peers(),
+            &Generic::Process(ref p) => p.init_peers(),
+            &Generic::ProcessBinary(ref pb) => pb.init_peers(),
+            &Generic::ZeroCopy(ref z) => z.init_peers(),
+        }
+    }
+
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
@@ -82,6 +93,7 @@ impl Generic {
             &mut Generic::ZeroCopy(ref mut z) => z.receive(),
         }
     }
+
     /// Perform work after scheduling operators.
     pub fn release(&mut self) {
         match self {
@@ -91,6 +103,7 @@ impl Generic {
             &mut Generic::ZeroCopy(ref mut z) => z.release(),
         }
     }
+
     fn events(&self) -> &Rc<RefCell<VecDeque<(usize, Event)>>> {
         match self {
             &Generic::Thread(ref t) => t.events(),
@@ -111,6 +124,7 @@ impl Generic {
 impl Allocate for Generic {
     fn index(&self) -> usize { self.index() }
     fn peers(&self) -> usize { self.peers() }
+    fn init_peers(&self) -> usize { self.init_peers() }
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {

@@ -32,11 +32,9 @@ fn main() {
                 input.send(round);
             }
             input.advance_to(round + 1);
-            // println!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> advance_to {}", round+1);
             while probe.less_than(input.time()) {
                 worker.step();
             }
-            // println!(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> probe caught up {}", round+1);
         }
 
         println!("Done!");
