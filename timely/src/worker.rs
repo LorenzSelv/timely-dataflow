@@ -270,10 +270,8 @@ impl<A: Allocate> Worker<A> {
         !self.dataflows.borrow().is_empty()
     }
 
+    /// Check if a new worker joined the cluster
     fn rescale(&mut self) {
-        // If a new worker joined the cluster, back-fill all allocated channels.
-        // Also, if we were selected for bootstrapping the new worker's progress tracker,
-        // then the bootstrap_worker_server closure will be invoked.
         let progcasters1 = self.progcaster_server_handles.clone();
         let progcasters2 = self.progcaster_server_handles.clone();
         let progcasters3 = self.progcaster_server_handles.clone();
