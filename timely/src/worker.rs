@@ -236,11 +236,9 @@ impl<A: Allocate> Worker<A> {
             self.logging().as_mut().map(|l| l.log(crate::logging::ParkEvent::park(duration)));
             self.logging.borrow_mut().flush();
 
-            println!("########################################### PARKED!");
             self.allocator
                 .borrow()
                 .await_events(duration);
-            println!("########################################### UN-PARKED!");
 
             // Log return from unpark.
             self.logging().as_mut().map(|l| l.log(crate::logging::ParkEvent::unpark()));
@@ -488,11 +486,9 @@ impl<A: Allocate> Worker<A> {
         let mut operator = subscope.into_inner().build(self);
 
         let (client_handles, server_handles) = operator.get_progcasters_handles();
-        println!("handles length is {:?}", client_handles.len());
 
         self.progcaster_client_handles.extend(client_handles);
         self.progcaster_server_handles.extend(server_handles);
-        println!("handles length is {:?}", self.progcaster_server_handles.len());
 
         logging.as_mut().map(|l| l.log(crate::logging::OperatesEvent {
             id: identifier,
@@ -523,21 +519,15 @@ impl<A: Allocate> Worker<A> {
 
     /// TODO(lorenzo) doc
     pub fn bootstrap(&mut self) -> bool {
-        println!("enter bootstrap");
-
         let bootstrap_endpoint = self.allocator.borrow_mut().get_bootstrap_endpoint();
 
         if let Some(bootstrap_endpoint) = bootstrap_endpoint {
 
             let progcaster_states = bootstrap_endpoint.recv_progcaster_states();
 
-            println!("[W{}] got the states of length {}!", self.index(), progcaster_states.len());
-
             for (id, state) in progcaster_states.into_iter() {
                 self.progcaster_client_handles[&id].set_progcaster_state(state);
             }
-
-            println!("[W{}] set the states!", self.index());
 
             // TODO(lorenzo): lack of progress updates cause a problem; the get_missing_updates_ranges expects
             //      to read at least 1 progress update from each worker
@@ -553,13 +543,11 @@ impl<A: Allocate> Worker<A> {
 
             // TODO(lorenzo) each worker is asking for the same ranges.. forward request only once
             for progcaster in self.progcaster_client_handles.values() {
-                println!("[W{}] getting ranges!", self.index());
 
                 // We want missing update ranges for every worker (or at least check if something is missing)
                 let mut worker_todo: HashSet<usize> = progcaster.get_worker_indices();
 
                 while !worker_todo.is_empty() {
-                    // std::thread::sleep(std::time::Duration::from_secs(1)); // TODO(lorenzo) remove me
                     println!("workers left: {:?}", worker_todo);
 
                     // make received messages surface in puller channels
@@ -570,7 +558,7 @@ impl<A: Allocate> Worker<A> {
                         println!("[W{}] sent updates range {:?}", self.index(), missing_range);
 
                         let response = bootstrap_endpoint.recv_range_response();
-                        println!("[W{}] got updates range response buf={:?}", self.index(), response);
+                        println!("[W{}] got updates range response", self.index());
 
                         progcaster.apply_updates_range(missing_range, response);
                         println!("[W{}] applied updates range response", self.index());

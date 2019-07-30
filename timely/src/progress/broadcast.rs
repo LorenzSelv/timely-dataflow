@@ -43,7 +43,6 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
     fn encode(&mut self) -> Vec<u8> {
         // As HashMap does not implement Abomonation, we need to encode it as a vector.
         // We encode the change batch and the worker_seqno separately, one after the other.
-        println!("before encode: state is {:?}", self);
         let mut buf = Vec::new();
         // encode change_batch
         unsafe { abomonation::encode(&self.change_batch, &mut buf) }.expect("encode error");
@@ -54,7 +53,6 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
     }
 
     fn decode(mut buf: Vec<u8>) -> Self {
-        println!("before decode: buffer is {:?}", buf);
         let (typed, mut remaining) = unsafe { abomonation::decode::<ChangeBatch<(Location,T)>>(&mut buf[..]) }.expect("decode error");
         let change_batch = typed.clone();
         let (typed, remaining) = unsafe { abomonation::decode::<Vec<(usize,usize)>>(&mut remaining) }.expect("decode error");
@@ -70,19 +68,18 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         self.worker_seqno.get(&worker_index).map(|&next_seqno| next_seqno > seqno).unwrap_or(false)
     }
 
-    fn update(&mut self, progress_msg: &ProgressMsg<T>) {
+    fn update(&mut self, progress_msg: &ProgressMsg<T>, my_index: usize) {
         let worker_index = progress_msg.0;
         let seq_no = progress_msg.1;
         let progress_vec = &progress_msg.2;
-        println!("state before update: {:?}", self.worker_seqno);
-        println!("update {} {} {:?}", worker_index, seq_no, progress_vec);
+        println!("[W{}] recved  ProgressMsg from w={} with seqno={} changes={:?}", my_index, worker_index, seq_no, progress_vec);
 
         // make sure the message is the next message we expect to read
         if let Some(expected_seqno) = self.worker_seqno.insert(worker_index, seq_no + 1) {
             assert_eq!(expected_seqno, seq_no, "got wrong seqno!");
         } else {
             if seq_no != 0 {
-                println!("first seqno of worker {} should be 0! state is {:?}", worker_index, self.worker_seqno);
+                println!("[W{}] first seqno of worker {} should be 0! state is {:?}", my_index, worker_index, self.worker_seqno);
                 assert_eq!(seq_no, 0);
             }
         }
@@ -100,8 +97,6 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
 
         let (updates_range, remaining) = unsafe { abomonation::decode::<ProgressVec<T>>(&mut buf[..]) }.expect("decode error");
         assert_eq!(remaining.len(), 0);
-
-        println!("   applying updates range response {:?}", updates_range);
 
         for (pointstamp, delta) in updates_range.into_iter() {
             self.change_batch.update(pointstamp.clone(), *delta);
@@ -145,7 +140,7 @@ impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
                 let last_seqno = last_msg.1;
                 // `range.end_seqno` is exclusive: the new worker will read that message
                 // from the direct connection with the other worker.
-                println!("[has_updates_range] first_seqno={} last_seqno={} range={:?}", first_seqno, last_seqno, range);
+                // println!("[has_updates_range] first_seqno={} last_seqno={} range={:?}", first_seqno, last_seqno, range);
                 Some(first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno)
             }).unwrap_or(false)
     }
@@ -238,7 +233,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 let mut bootstrap_message = None;
                 let seqno = *(*counter1).borrow();
                 Progcaster::fill_message(&mut bootstrap_message, worker_index, seqno, &mut ChangeBatch::new());
-                println!("Sending bootstrap message seqno={}", seqno);
+                println!("[W{}] BOOTSTRAP MESSAGE seqno={}", worker_index, seqno);
                 pusher.push(&mut bootstrap_message);
                 // (we do not increment the seqno, this is just a "flag" message
             }
@@ -285,7 +280,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
     pub fn send(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
         assert!(!self.is_recording, "don't send during rescaling operations");
 
-        println!("Sending ProgressMessage with seqno={}", *(*self.counter).borrow());
+        println!("[W{}] sending ProgressMsg with seqno={} changes={:?}", self.source, *(*self.counter).borrow(), changes.clone().into_inner());
 
         changes.compact();
         if !changes.is_empty() {
@@ -376,7 +371,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                     changes.update(update.clone(), delta);
                 }
 
-                self.progress_state.update(&message);
+                self.progress_state.update(&message, self.source);
 
                 if self.is_recording {
                     let tuple = (source, counter, recv_changes.iter().cloned().collect());
@@ -505,7 +500,6 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
     fn set_progcaster_state(&self, state: Vec<u8>) {
         let mut progcaster = self.borrow_mut();
         progcaster.progress_state = ProgressState::decode(state);
-        println!("decoded state is {:?}", progcaster.progress_state);
     }
 
     fn get_missing_updates_ranges(&self, worker_todo: &mut HashSet<usize>) -> Vec<ProgressUpdatesRange> {
@@ -567,7 +561,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
         let progcaster = &mut *progcaster;
 
         for message in progcaster.progress_msg_stash.iter() {
-            progcaster.progress_state.update(message);
+            progcaster.progress_state.update(message, progcaster.source);
         }
 
         progcaster.progress_msg_stash.clear();

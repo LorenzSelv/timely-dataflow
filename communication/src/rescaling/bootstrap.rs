@@ -152,6 +152,8 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
         endpoint.state_tx.send(states.clone()).expect("failed to send progcasters' state to worker");
     }
 
+    // TODO(lorenzo) every worker in this process is asking for the same updates!
+    //               send the request only once and cache the result
     for endpoint in bootstrap_send_endpoints.iter() {
 
         // the worker thread will drop the tx endpoint when it has no more range requests
