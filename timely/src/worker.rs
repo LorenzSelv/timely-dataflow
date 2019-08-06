@@ -517,7 +517,24 @@ impl<A: Allocate> Worker<A> {
 
     }
 
-    /// TODO(lorenzo) doc
+    /// Initialize the progress tracking state of the worker.
+    ///
+    /// If a worker is *not* joining the cluster, this is a no-op and return `false`.
+    /// If a worker is joining the cluster, then perform steps below and return `true`:
+    ///
+    ///   1) recv and set the initial progress state
+    ///        the progress state is the accumulated change batch of progress updates,
+    ///        since most updates cancel each other, we expect it to not be too large (TODO verify)
+    ///
+    ///   2) get missing updates ranges
+    ///        when a new worker join the cluster, every other worker send a bootstrap
+    ///        message which contains the seqno of the progress message it will send next.
+    ///        As a result, the new worker knows, if there is a gap between what is contained
+    ///        in the state received at step (1) and the direct connection to the other worker.
+    ///        If such gap exists, then it asks for the missing updates range to the bootstrap server.
+    ///
+    ///   Step (2) is repeated for each progcaster (there's one for each scope).
+    ///
     pub fn bootstrap(&mut self) -> bool {
         let bootstrap_endpoint = self.allocator.borrow_mut().get_bootstrap_endpoint();
 
@@ -528,18 +545,6 @@ impl<A: Allocate> Worker<A> {
             for (id, state) in progcaster_states.into_iter() {
                 self.progcaster_client_handles[&id].set_progcaster_state(state);
             }
-
-            // TODO(lorenzo): lack of progress updates cause a problem; the get_missing_updates_ranges expects
-            //      to read at least 1 progress update from each worker
-            //      If there are no progress updates that it waits.
-            //      Possible solutions:
-            //      1) timeout based -- subject to race conditions
-            //      2) during rescaling, after opening a socket to each worker, they write in the socket a vector of (channel_id, last_seqno_sent)
-            //         the new worker is then guaranteed to read form `last_seqno_sent + 1` onwards (see below)
-            // TODO
-            //         problem: new pushers are appended only when calling `rescale`, so if there is an ongoing computation step, it might push progress updates
-            //         which are larger than last_seqno_sent but will not be pushed in the new channel
-            //         possible workaround -- since each step round send at only one progress message => last_seqno_sent+1 is guaranteed
 
             // TODO(lorenzo) each worker is asking for the same ranges.. forward request only once
             for progcaster in self.progcaster_client_handles.values() {
@@ -564,9 +569,6 @@ impl<A: Allocate> Worker<A> {
                         println!("[W{}] applied updates range response", self.index());
                     }
                 }
-
-                println!("[W{}] applying stashed", self.index());
-                progcaster.apply_stashed_progress_msgs();
             }
 
             true

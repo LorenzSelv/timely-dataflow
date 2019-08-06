@@ -57,7 +57,6 @@ pub struct TcpBuilder<A: AllocateBuilder> {
 ///   info to spawn ingress comm thresds,
 /// )
 /// ```
-// TODO(lorenzo) format long functions like this
 pub fn new_vector<A: AllocateBuilder>(
     allocators: Vec<A>,
     my_process: usize,

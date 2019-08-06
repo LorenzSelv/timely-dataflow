@@ -66,7 +66,7 @@ impl BootstrapRecvEndpoint {
     }
 }
 
-/// TODO
+/// Setup connection with target address and perform sender handshake (send my_index)
 pub fn start_connection(my_index: usize, address: SocketAddrV4) -> TcpStream {
     loop {
         match TcpStream::connect(address) {
@@ -104,7 +104,7 @@ pub struct ProgressUpdatesRange {
     pub end_seqno: usize,
 }
 
-/// TODO
+/// Simple wrapper to read and decode abomonated fixed-size types from a stream
 pub fn read_decode<T: Abomonation + Copy>(stream: &mut TcpStream) -> T {
     // note: supports only fixed-size types
     let mut buf = vec![0_u8; std::mem::size_of::<T>()];
@@ -114,14 +114,38 @@ pub fn read_decode<T: Abomonation + Copy>(stream: &mut TcpStream) -> T {
     typed
 }
 
-/// TODO
+/// Simple wrapper to encode and write abomonated types to a stream
 pub fn encode_write<T: Abomonation>(stream: &mut TcpStream, typed: &T) {
     let mut buf = Vec::new();
     unsafe { abomonation::encode(typed, &mut buf) }.expect("encode error");
     stream.write(&buf[..]).expect("write error");
 }
 
-/// TODO(lorenzo) doc
+/// Client side of the bootstrapping protocol for a new worker process joining the cluster.
+///
+/// This function is executed by a separate thread that is spawned while building
+/// the cluster configuration if the --join flag was passed as an argument.
+/// This thread is unique to the whole process, thus multiple workers are talking to this
+/// thread when performing the initialization protocol.
+///
+/// It takes an ip:port pair where it should listen to for incoming connection: the
+/// bootstrap server will initiate a connection to that address (the address is the first thing sent
+/// after setting up the TCP connection - `send_bootstrap_addr` function).
+///
+/// `bootstrap_send_endpoints` is a vector of endpoints to every worker thread in this timely process.
+/// All the data received by the bootstrap server will be broadcasted to all workers.
+///
+/// Since the `communication` crate has no notion of timestamps and other timely data types,
+/// the protocol is only dealing with encoded data types (prepended with their sizes).
+/// The worker threads will read from the shared endpoint and perform the decode operation.
+///
+/// This is also necessary since every progcaster might have a different timestamp type
+/// (e.g. nested scopes) and we would need some sort dynamic typing / generic mechanism which
+/// would make things very complicated.
+///
+/// After forwarding the received state, it waits for range request from each endpoint.
+/// A closed channel with the worker is the signal that there are no more range requests to satisfy.
+///
 pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endpoints: Vec<BootstrapSendEndpoint>) {
 
     // wait for the server to initiate the connection

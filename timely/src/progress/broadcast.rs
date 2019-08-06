@@ -203,9 +203,6 @@ pub struct Progcaster<T:Timestamp> {
     /// we need to maintain accumulate state, so that we can bootstrap workers during rescaling
     progress_state: ProgressState<T>,
 
-    // where we stash messages that we should apply to the progress state after initialization
-    progress_msg_stash: Vec<ProgressMsg<T>>,
-
     recorder: ProgressRecorder<T>,
     is_recording: bool,
 
@@ -268,7 +265,6 @@ impl<T:Timestamp+Send> Progcaster<T> {
             channel_identifier,
             logging,
             progress_state: ProgressState::new(),
-            progress_msg_stash: Vec::new(),
             recorder: ProgressRecorder::new(),
             is_recording: false, // not recording initially
         }
@@ -427,11 +423,6 @@ pub trait ProgcasterClientHandle {
     /// TODO update doc
     fn get_missing_updates_ranges(&self, workers_todo: &mut HashSet<usize>) -> Vec<ProgressUpdatesRange>;
 
-    /// To figure out the missing updates, we pulled from the channel and stashed
-    /// away progress messages. These messages should be applied to the state to
-    /// complete the initialization.
-    fn apply_stashed_progress_msgs(&self);
-
     /// Return a boxed clone of this handle.
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle>;
 }
@@ -545,17 +536,6 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
     fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
         let mut progcaster = self.borrow_mut();
         progcaster.progress_state.apply_updates_range(range, updates_range)
-    }
-
-    fn apply_stashed_progress_msgs(&self) {
-        let mut progcaster = self.borrow_mut();
-        let progcaster = &mut *progcaster;
-
-        for message in progcaster.progress_msg_stash.iter() {
-            progcaster.progress_state.update(message, progcaster.source);
-        }
-
-        progcaster.progress_msg_stash.clear();
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle> {

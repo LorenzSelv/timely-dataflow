@@ -35,7 +35,7 @@ pub trait AllocateBuilder : Send {
     fn build(self) -> Self::Allocator;
 }
 
-/// Alias trait for the `on_new_push` closure expected by the `allocate` function
+/// Alias trait for the `on_new_push` closure expected by the `allocate` function.
 ///
 /// The closure expects a (boxed) pusher to for messages of type `T`.
 /// The intended behavior is to add the pusher to a list of pushers wrapped
@@ -47,12 +47,11 @@ pub trait AllocateBuilder : Send {
 pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
 impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
-/// TODO(lorenzo) doc
+/// Alias trait for the send_state_closure expected by the `rescale` function.
 pub trait BootstrapSendStateClosure : FnOnce(&mut TcpStream) {}
 impl <F: FnOnce(&mut TcpStream)> BootstrapSendStateClosure for F {}
 
-/// TODO(lorenzo) doc
-/// TODO FnOnce?
+/// Alias trait for the get_updates_range_closure expected by the `rescale` function.
 pub trait BootstrapGetUpdatesRangeClosure : Fn(&ProgressUpdatesRange) -> Option<Vec<u8>> {}
 impl <F: Fn(&ProgressUpdatesRange) -> Option<Vec<u8>>> BootstrapGetUpdatesRangeClosure for F {}
 
@@ -76,11 +75,11 @@ pub trait Allocate {
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
          where F: OnNewPushFn<T>;
 
-    /// If a configuration change happens in the cluster, adapt existing channel to reflect that change.
+    /// If a configuration change happens in the cluster, adapt existing channels to reflect that change.
     ///
     /// This function is implemented only by the `TcpAllocator` which allows the addition (and maybe removal?)
     /// of workers. When a new worker process joins the computation, it would initiate connection to every other process
-    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (see communication/src/mod.rs).
+    /// in the cluster. Each process, in turn, has an additional thread waiting for connections (rescaler thread, see communication/src/mod.rs).
     ///
     /// This function checks with the acceptor thread if a worker process joined, and if that is case it would
     /// update allocator internal state and back-fill existing channels, by calling the `on_new_pusher`
@@ -92,7 +91,15 @@ pub trait Allocate {
     /// The `ExchangePusher` relies on the modulo operator, and thus on a constant number of peers
     /// to maintain correctness. This needs to be updated to use a routing table, or to require the usage
     /// of Megaphone that keeps the routing table for us.
-    /// TODO(lorenzo): explain bootstrap closures
+    ///
+    /// If a rescaling operations happened, the new worker process selected a bootstrap server to
+    /// initialize its own progress tracking state.
+    /// The bootstrap closures are used to perform the initialization protocol by the bootstrap server.
+    /// We need to pass closures in order to hide the usage of data types that are only available
+    /// in the timely crate (not in the communication crate) such as `Progcaster` or the `Timestamp` type itself.
+    ///
+    /// The closures are defined in the `Worker::rescale` function which is calling this function.
+    ///
     fn rescale(&mut self,
                _: impl BootstrapSendStateClosure,
                _: impl BootstrapGetUpdatesRangeClosure,

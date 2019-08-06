@@ -70,10 +70,10 @@ impl Configuration {
     pub fn from_args<I: Iterator<Item=String>>(args: I) -> Result<Configuration,String> {
         let opts = Configuration::options();
 
-        // TODO(lorenzo) need to distinguish between the initial shape of the cluster vs the
-        //               shape of the cluster after rescaling (i.e. what `n` should be).
-        //               - the initial `n` (-n)   is needed to initialize the progress tracker capabilities.
-        //               - the current `n` (--nn) is needed to know who to setup connection to.
+        //  We need to distinguish between the initial shape of the cluster vs the
+        //  shape of the cluster after rescaling (i.e. what `n` should be).
+        //  - the initial `n` (-n)   is needed to initialize the progress tracker capabilities.
+        //  - the current `n` (--nn) is needed to know who to setup connection to.
         opts.parse(args)
             .map_err(|e| format!("{:?}", e))
             .map(|matches| {
