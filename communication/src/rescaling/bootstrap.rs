@@ -6,6 +6,7 @@ use std::net::{SocketAddrV4, TcpStream, TcpListener};
 use crate::networking::{recv_handshake, send_handshake};
 use abomonation::Abomonation;
 use std::io::{Read, Write};
+use std::collections::HashMap;
 
 /// Collection of channels to send encoded data (related to progress tracking)
 /// from the bootstrap_worker_client to a worker thread. Used by the bootstrap client.
@@ -97,7 +98,7 @@ fn await_connection(address: SocketAddrV4) -> TcpStream {
 }
 
 /// Identifies a range of progress updates
-#[derive(Clone, Debug, Abomonation)]
+#[derive(Clone, Debug, Abomonation, PartialEq, Eq, Hash)]
 pub struct ProgressUpdatesRange {
     /// identifier for the channel (also unique integer identifier for the scope)
     pub channel_id: usize,
@@ -181,6 +182,9 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
         endpoint.state_tx.send(states.clone()).expect("failed to send progcasters' state to worker");
     }
 
+    // cache the range results so we avoid unnecessary request to the bootstrap server
+    let mut range_cache = HashMap::<ProgressUpdatesRange, Vec<u8>>::new();
+
     // TODO(lorenzo) every worker in this process is asking for the same updates!
     //               send the request only once and cache the result
     for endpoint in bootstrap_send_endpoints.iter() {
@@ -188,18 +192,24 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
         // the worker thread will drop the tx endpoint when it has no more range requests
         while let Ok(range_req) = endpoint.range_req_rx.recv() {
 
-            // (0) send range requests
-            encode_write(&mut tcp_stream, &range_req);
+            let range_ans_buf = range_cache.entry(range_req.clone()).or_insert_with(|| {
+                // (0) send range requests
+                encode_write(&mut tcp_stream, &range_req);
+                println!("[bootstrap_worker_client] sent range request to bootstrap_server: {:?}", range_req);
 
-            // (1) read size of the encoded updates_range
-            let range_ans_size = read_decode(&mut tcp_stream);
+                // (1) read size of the encoded updates_range
+                let range_ans_size = read_decode(&mut tcp_stream);
 
-            // (2) read encoded updates_range
-            let mut range_ans_buf = vec![0_u8; range_ans_size];
-            tcp_stream.read_exact(&mut range_ans_buf[..]).expect("read_exact error");
+                // (2) read encoded updates_range
+                let mut range_ans_buf = vec![0_u8; range_ans_size];
+                tcp_stream.read_exact(&mut range_ans_buf[..]).expect("read_exact error");
+
+                // store buffer in the cache
+                range_ans_buf
+            });
 
             // (3) send back encoded range answer
-            endpoint.range_ans_tx.send(range_ans_buf).expect("send failed");
+            endpoint.range_ans_tx.send(range_ans_buf.clone()).expect("send failed");
         }
 
         println!("done bootstrapping a worker");

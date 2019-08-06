@@ -546,7 +546,6 @@ impl<A: Allocate> Worker<A> {
                 self.progcaster_client_handles[&id].set_progcaster_state(state);
             }
 
-            // TODO(lorenzo) each worker is asking for the same ranges.. forward request only once
             for progcaster in self.progcaster_client_handles.values() {
 
                 // We want missing update ranges for every worker (or at least check if something is missing)

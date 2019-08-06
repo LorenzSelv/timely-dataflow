@@ -153,7 +153,6 @@ impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
     fn get_updates_range(&mut self, range: &ProgressUpdatesRange) -> Vec<u8> {
 
-        // TODO(lorenzo) multiple workers will ask for the same range, unless we cache the result on the bootstrap client side
         let msgs = self.worker_msgs.get(&range.worker_index).expect("requested a range for missing worker index");
 
         let first_seqno = msgs[0].1;
