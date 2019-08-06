@@ -4,7 +4,9 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use crate::communication::{Data, Pull};
+use crate::communication::Message;
 use crate::communication::allocator::thread::{ThreadPusher, ThreadPuller};
+use crate::communication::allocator::OnNewPushFn;
 use crate::scheduling::Scheduler;
 use crate::scheduling::activate::Activations;
 use crate::progress::{Timestamp, Operate, SubgraphBuilder};
@@ -13,6 +15,7 @@ use crate::progress::timestamp::Refines;
 use crate::order::Product;
 use crate::logging::TimelyLogger as Logger;
 use crate::worker::AsWorker;
+
 
 use super::{ScopeParent, Scope};
 
@@ -133,9 +136,6 @@ where
         result
     }
 }
-
-use crate::communication::Message;
-use timely_communication::allocator::OnNewPushFn; // TODO(lorenzo) move me up
 
 impl<'a, G, T> Clone for Child<'a, G, T>
 where

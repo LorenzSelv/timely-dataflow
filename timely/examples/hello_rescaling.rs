@@ -11,10 +11,16 @@ fn main() {
         let mut input = InputHandle::new();
         let mut probe = ProbeHandle::new();
 
+        // TODO(lorenzo)
+        //    capability semantics:
+        //         timely/src/dataflow/operators/generic/builder_rc.rs:110  -- is this fine in join mode ?
+        //         is the double exchange below fine ?
+
         // create a new input, exchange data, and inspect its output
         worker.dataflow(|scope| {
             scope.input_from(&mut input)
                  .exchange(|x| *x)
+                 .exchange(|x| *x+1)
                  .inspect(move |x| println!("worker {}:\thello {}", index, x))
                  .probe_with(&mut probe);
         });

@@ -135,7 +135,7 @@ impl Drop for MergeQueue {
 
 /// A `BytesPush` wrapper which stages writes.
 pub struct SendEndpoint<P: BytesPush> {
-    send: P, // TODO(lorenzo) this is a MergeQueue
+    send: P, // this is a MergeQueue
     buffer: BytesSlab,
 }
 

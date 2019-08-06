@@ -35,11 +35,6 @@ impl<T: Timestamp> ProgressState<T> {
             worker_seqno: HashMap::new(),
         }
     }
-
-    // TODO(lorenzo) after a rescaling operation is complete, we should track also the new worker in the state
-    fn new_worker(&mut self, _worker_index: usize) {
-        unimplemented!();
-    }
 }
 
 impl<T: Timestamp+Abomonation> ProgressState<T> {

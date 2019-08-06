@@ -266,7 +266,6 @@ where
     pointstamp_tracker: reachability::Tracker<TInner>,
 
     // channel / whatever used to communicate pointstamp updates to peers.
-    // TODO(lorenzo) should be rc refcell
     progcaster: Rc<RefCell<Progcaster<TInner>>>,
 
     // handles to the wrapped progcasters
