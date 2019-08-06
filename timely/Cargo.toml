@@ -30,3 +30,7 @@ timely_communication = { path = "../communication", version = "0.9" }
 [dev-dependencies]
 timely_sort="0.1.6"
 rand="0.4"
+
+[[example]]
+name="rescaling_hello"
+path="examples/rescaling/rescaling_hello.rs"

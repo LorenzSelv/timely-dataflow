@@ -189,6 +189,7 @@ pub struct TcpAllocator<A: Allocate> {
 impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
+    fn inner_peers(&self) -> usize { self.inner.peers() }
     fn init_peers(&self) -> usize { self.init_peers }
     fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_push: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>

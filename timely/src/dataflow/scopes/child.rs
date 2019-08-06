@@ -58,6 +58,7 @@ where
     fn index(&self) -> usize { self.parent.index() }
     fn peers(&self) -> usize { self.parent.peers() }
     fn init_peers(&self) -> usize { self.parent.init_peers() }
+    fn inner_peers(&self) -> usize { self.parent.inner_peers() }
     fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
         where F: OnNewPushFn<D>
     {

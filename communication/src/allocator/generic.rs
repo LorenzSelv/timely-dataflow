@@ -49,6 +49,16 @@ impl Generic {
         }
     }
 
+    /// The number of workers per process.
+    pub fn inner_peers(&self) -> usize {
+        match self {
+            &Generic::Thread(ref t) => t.inner_peers(),
+            &Generic::Process(ref p) => p.inner_peers(),
+            &Generic::ProcessBinary(ref pb) => pb.inner_peers(),
+            &Generic::ZeroCopy(ref z) => z.inner_peers(),
+        }
+    }
+
     /// The initial number of workers.
     pub fn init_peers(&self) -> usize {
         match self {
@@ -124,6 +134,7 @@ impl Generic {
 impl Allocate for Generic {
     fn index(&self) -> usize { self.index() }
     fn peers(&self) -> usize { self.peers() }
+    fn inner_peers(&self) -> usize { self.inner_peers() }
     fn init_peers(&self) -> usize { self.init_peers() }
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>

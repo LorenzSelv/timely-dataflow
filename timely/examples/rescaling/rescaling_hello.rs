@@ -1,3 +1,16 @@
+//! Usage:
+//!    Run in different terminals the following commands:
+//!
+//!   1) cargo run --package timely --example rescaling_hello -- -n2 -w2 -p0
+//!   2) cargo run --package timely --example rescaling_hello -- -n2 -w2 -p1
+//!
+//! After a bit..
+//!
+//!   3) cargo run --package timely --example rescaling_hello -- -n2 -w2 -p2 --join 0 --nn 3
+//!
+//!      join the cluster with worker 0 as bootstrap server (--join 0), there are now 3 processes in
+//!      the cluster (--nn 3)
+//!
 extern crate timely;
 
 use timely::dataflow::{InputHandle, ProbeHandle};
@@ -14,7 +27,6 @@ fn main() {
         // TODO(lorenzo)
         //    capability semantics:
         //         timely/src/dataflow/operators/generic/builder_rc.rs:110  -- is this fine in join mode ?
-        //         is the double exchange below fine ?
 
         // create a new input, exchange data, and inspect its output
         worker.dataflow(|scope| {
@@ -32,7 +44,7 @@ fn main() {
         }
 
         // introduce data and watch!
-        for round in 0..30 {
+        for round in 0..10 {
             if index == 0 {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 input.send(round);

@@ -31,6 +31,8 @@ pub trait AsWorker : Scheduler {
     fn index(&self) -> usize;
     /// Number of peer workers.
     fn peers(&self) -> usize;
+    /// Number of peers workers per process.
+    fn inner_peers(&self) -> usize;
     /// Number of peer workers in the initial configuration
     /// (differs from `peers()` only if a rescaling operation has occurred).
     fn init_peers(&self) -> usize;
@@ -91,6 +93,7 @@ impl<A: Allocate> AsWorker for Worker<A> {
     fn index(&self) -> usize { self.allocator.borrow().index() }
     fn peers(&self) -> usize { self.allocator.borrow().peers() }
     fn init_peers(&self) -> usize { self.allocator.borrow().init_peers() }
+    fn inner_peers(&self) -> usize { self.allocator.borrow().inner_peers() }
     fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
         where F: OnNewPushFn<D>
     {
@@ -557,7 +560,7 @@ impl<A: Allocate> Worker<A> {
                     // make received messages surface in puller channels
                     self.allocator.borrow_mut().receive();
 
-                    for missing_range in progcaster.get_missing_updates_ranges(&mut worker_todo).into_iter() {
+                    if let Some(missing_range) = progcaster.get_missing_updates_range(&mut worker_todo) {
                         bootstrap_endpoint.send_range_request(missing_range.clone());
                         println!("[W{}] sent updates range {:?}", self.index(), missing_range);
 

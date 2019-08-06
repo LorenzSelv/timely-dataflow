@@ -28,6 +28,7 @@ pub struct Thread {
 impl Allocate for Thread {
     fn index(&self) -> usize { 0 }
     fn peers(&self) -> usize { 1 }
+    fn inner_peers(&self) -> usize { 1 }
     fn allocate<T: 'static, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<Pull<Message<T>>>
             where F: OnNewPushFn<T>
     {

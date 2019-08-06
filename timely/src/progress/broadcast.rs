@@ -56,6 +56,7 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let change_batch = typed.clone();
         let (typed, remaining) = unsafe { abomonation::decode::<Vec<(usize,usize)>>(&mut remaining) }.expect("decode error");
         let worker_seqno: HashMap<usize,usize> = typed.iter().map(|&x| x).collect();
+        println!("[decode] received worker_seqno = {:?}", worker_seqno);
         assert_eq!(remaining.len(), 0);
         ProgressState {
             acc_updates: change_batch.clone(),
@@ -76,11 +77,12 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
 
         // make sure the message is the next message we expect to read
         if let Some(expected_seqno) = self.worker_seqno.insert(worker_index, seq_no + 1) {
-            assert_eq!(expected_seqno, seq_no, "got wrong seqno!");
+            if expected_seqno != seq_no {
+                panic!("got wrong seqno: expected = {}, received = {}, state is {:?}", expected_seqno, seq_no, self.worker_seqno);
+            }
         } else {
             if seq_no != 0 {
-                println!("[W{}] first seqno of worker {} should be 0! state is {:?}", my_index, worker_index, self.worker_seqno);
-                assert_eq!(seq_no, 0);
+                panic!("[W{}] first seqno of worker {} should be 0! state is {:?}", my_index, worker_index, self.worker_seqno);
             }
         }
 
@@ -93,7 +95,8 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
 
     fn apply_updates_range(&mut self, range: ProgressUpdatesRange, mut buf: Vec<u8>) {
         // make sure we are applying the correct range and update the next sequence number
-        assert_eq!(self.worker_seqno[&range.worker_index], range.start_seqno);
+        // if the worker index is contained in the state, then it must be 0
+        assert_eq!(*self.worker_seqno.get(&range.worker_index).unwrap_or(&0_usize), range.start_seqno);
         self.worker_seqno.insert(range.worker_index, range.end_seqno);
 
         let (updates_range, remaining) = unsafe { abomonation::decode::<ProgressVec<T>>(&mut buf[..]) }.expect("decode error");
@@ -138,17 +141,22 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
 impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
     fn has_updates_range(&mut self, range: &ProgressUpdatesRange) -> bool {
-        println!("[has_updates_range] worker_msgs is {:?}", self.worker_msgs.iter().map(|(w,msgs)| (w, msgs.iter().map(|msg| msg.1).collect::<Vec<_>>())).collect::<Vec<_>>());
-        self.worker_msgs.get(&range.worker_index)
-            .and_then(|msgs| msgs.first().map(|first| (first, msgs.last().unwrap())))
-            .and_then(|(first_msg, last_msg)| {
-                let first_seqno = first_msg.1;
-                let last_seqno = last_msg.1;
-                // `range.end_seqno` is exclusive: the new worker will read that message
-                // from the direct connection with the other worker.
-                // println!("[has_updates_range] first_seqno={} last_seqno={} range={:?}", first_seqno, last_seqno, range);
-                Some(first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno)
-            }).unwrap_or(false)
+        println!("[has_updates_range] asked for {:?} -- worker_msgs is {:?}", range, self.worker_msgs.iter().map(|(w,msgs)| (w, msgs.iter().map(|msg| msg.1).collect::<Vec<_>>())).collect::<Vec<_>>());
+
+        let msgs = self.worker_msgs.entry(range.worker_index).or_insert(Vec::new());
+
+        if msgs.len() > 0 {
+            let first_seqno = msgs.first().unwrap().1;
+            let last_seqno = msgs.last().unwrap().1;
+            // `range.end_seqno` is exclusive: the new worker will read that message
+            // from the direct connection with the other worker.
+            // println!("[has_updates_range] first_seqno={} last_seqno={} range={:?}", first_seqno, last_seqno, range);
+            first_seqno <= range.start_seqno && range.end_seqno - 1 <= last_seqno
+        } else {
+            // it's possible that this worker has not received progress updates by some workers yet
+            // if the rescaling operation is happening right after starting the cluster or after another rescaling operation
+            false
+        }
     }
 
     fn get_updates_range(&mut self, range: &ProgressUpdatesRange) -> Vec<u8> {
@@ -188,10 +196,14 @@ pub struct Progcaster<T:Timestamp> {
     // reuse allocations
     to_push: Option<ProgressMsg<T>>,
 
-    pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>, // TODO: this will become and hashmap, and we get the IDs from there
+    // TODO(lorenzo): this will become an hashmap, and we get the IDs from there
+    //                for now we assume indices are [0..pushers.len()[
+    pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>,
     puller: Box<Pull<ProgressMsg<T>>>,
     /// Source worker index
     source: usize,
+    /// Number of peers workers within the process
+    local_peers: usize,
     /// Sequence number counter
     counter: Rc<RefCell<usize>>,
     /// Sequence of nested scope identifiers indicating the path from the root to this subgraph
@@ -218,6 +230,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
         let pushers2 = Rc::clone(&pushers1);
 
         let worker_index = worker.index();
+        let local_peers = worker.inner_peers();
 
         let counter1 = Rc::new(RefCell::new(0_usize));
         let counter2 = Rc::clone(&counter1);
@@ -259,6 +272,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
             pushers: pushers2,
             puller,
             source: worker_index,
+            local_peers,
             counter: counter2,
             addr,
             channel_identifier,
@@ -278,10 +292,10 @@ impl<T:Timestamp+Send> Progcaster<T> {
     pub fn send(&mut self, mut changes: &mut ChangeBatch<(Location, T)>) {
         assert!(!self.is_recording, "don't send during rescaling operations");
 
-        println!("[W{}] sending ProgressMsg with seqno={} changes={:?}", self.source, *(*self.counter).borrow(), changes.clone().into_inner());
-
         changes.compact();
         if !changes.is_empty() {
+
+            println!("[W{}] sending ProgressMsg with seqno={} changes={:?}", self.source, *(*self.counter).borrow(), changes.clone().into_inner());
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
                 is_send: true,
                 is_duplicate: false,
@@ -416,11 +430,9 @@ pub trait ProgcasterClientHandle {
     /// Return the worker indices in the progress state
     fn get_worker_indices(&self) -> HashSet<usize>;
 
-    /// Return a list of missing range requests. These requests, when combined to the accumulated
-    /// state of the progcaster, would provide all the progress messages that need to be received
-    /// to complete the initialization of the progcaster.
-    /// TODO update doc
-    fn get_missing_updates_ranges(&self, workers_todo: &mut HashSet<usize>) -> Vec<ProgressUpdatesRange>;
+    /// Return a the next missing range request that should be forwarded to the bootstrap server.
+    /// `workers_todo` is the set of worker indices from which we expect to receive a bootstrap message.
+    fn get_missing_updates_range(&self, workers_todo: &mut HashSet<usize>) -> Option<ProgressUpdatesRange>;
 
     /// Return a boxed clone of this handle.
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle>;
@@ -484,13 +496,28 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
         progcaster.progress_state = ProgressState::decode(state);
     }
 
-    fn get_missing_updates_ranges(&self, worker_todo: &mut HashSet<usize>) -> Vec<ProgressUpdatesRange> {
+    fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
+        let mut progcaster = self.borrow_mut();
+        progcaster.progress_state.apply_updates_range(range, updates_range)
+    }
+
+    fn get_worker_indices(&self) -> HashSet<usize> {
+        // TODO(lorenzo) assumptions:
+        //   1) worker indices are 0..peers
+        //   2) this process covers index range [peers - local_peers, peers[
+        //       => we return all indices of workers that are not in this process
+        //       => [0..peers-local_peers[
+        let progcaster = self.borrow();
+        let local_peers = progcaster.local_peers;
+        let peers = progcaster.pushers.borrow().len();
+        (0..peers-local_peers).collect()
+    }
+
+    fn get_missing_updates_range(&self, worker_todo: &mut HashSet<usize>) -> Option<ProgressUpdatesRange> {
 
         let progcaster = &mut *self.borrow_mut();
 
-        let mut missing_ranges = Vec::new();
-
-        while let Some(message) = progcaster.puller.pull() {
+        if let Some(message) = progcaster.puller.pull() {
             let worker_index = message.0;
             let msg_seqno = message.1;
             let recv_changes = &message.2;
@@ -517,31 +544,26 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
                         start_seqno: state_seqno,
                         end_seqno: msg_seqno,
                     };
-                    missing_ranges.push(missing_range);
+                    Some(missing_range)
+                } else {
+                    // Other workers are still making progress, so they might send more progress updates
+                    // before all workers get the chance to send their init_message.
+                    // If that's the case we need to update the progress_state, but we need to make
+                    // sure that all updates from that worker have been already integrated in the progress state.
+                    // This is guaranteed if we fulfill the missing range request before pulling again.
+                    progcaster.progress_state.update(message, progcaster.source);
+                    None
                 }
             } else {
-                // Other workers are still making progress, so they might send more progress updates
-                // before all workers get the chance to send their init_message.
-                // If that's the case we need to update the progress_state
                 progcaster.progress_state.update(message, progcaster.source);
+                None
             }
-
-            if worker_todo.is_empty() { break }
+        } else {
+            None
         }
-
-        missing_ranges
-    }
-
-    fn apply_updates_range(&self, range: ProgressUpdatesRange, updates_range: Vec<u8>) {
-        let mut progcaster = self.borrow_mut();
-        progcaster.progress_state.apply_updates_range(range, updates_range)
     }
 
     fn boxed_clone(&self) -> Box<ProgcasterClientHandle> {
         Box::new(Rc::clone(&self))
-    }
-
-    fn get_worker_indices(&self) -> HashSet<usize> {
-        self.borrow().progress_state.worker_seqno.keys().map(|x| *x).collect()
     }
 }
