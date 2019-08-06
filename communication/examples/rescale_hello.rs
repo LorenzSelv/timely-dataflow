@@ -1,4 +1,8 @@
 ///
+/// NOTE: this simple example does not work anymore as we expect more operations to be performed
+///       (e.g. sending progcaster states) so the new worker stalls waiting for stuff that will not arrive.
+///       Not worth it to invest time to get this working: refer to example `hello_rescaling` in timely crate.
+///
 /// Usage:
 ///
 /// 1) start a computation with e.g. two process, each with a single worker

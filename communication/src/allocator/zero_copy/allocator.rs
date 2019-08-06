@@ -38,10 +38,13 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
 
-    // TODO(lorenzo) explain
+    // give the rescaler thread a buzzer to unpark the worker thread when a
+    // rescaling operation occurs
     buzzer_tx: Sender<Buzzer>,
 
-    // TODO(lorenzo) explain
+    // if the worker is joining the cluster it has a shared endpoint with
+    // the bootstrap client thread that is the performing the bootstrapping protocol
+    // and broadcasting the encoded data received by the bootstrap server.
     bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
 }
 
@@ -173,7 +176,9 @@ pub struct TcpAllocator<A: Allocate> {
     // receiver side of the channel to the acceptor thread (see `rescale` method).
     rescaler_rx: Receiver<RescaleMessage>,
 
-    // TODO(lorenzo) explain
+    // if the worker is joining the cluster it has a shared endpoint with
+    // the bootstrap client thread that is the performing the bootstrapping protocol
+    // and broadcasting the encoded data received by the bootstrap server.
     bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
 
     // store channels allocated so far, so that we can back-fill them with

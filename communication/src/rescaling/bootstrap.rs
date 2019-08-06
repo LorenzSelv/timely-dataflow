@@ -1,4 +1,5 @@
-//! TODO(lorenzo) doc
+//! Implementation of the bootstrapping protocol to initialize the progress tracking state
+//! of a new worker threads joining the cluster.
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::net::{SocketAddrV4, TcpStream, TcpListener};
@@ -6,7 +7,8 @@ use crate::networking::{recv_handshake, send_handshake};
 use abomonation::Abomonation;
 use std::io::{Read, Write};
 
-/// TODO
+/// Collection of channels to send encoded data (related to progress tracking)
+/// from the bootstrap_worker_client to a worker thread. Used by the bootstrap client.
 pub struct BootstrapSendEndpoint {
     state_tx: Sender<Vec<(usize,Vec<u8>)>>,
     range_req_rx: Receiver<ProgressUpdatesRange>,
@@ -15,7 +17,8 @@ pub struct BootstrapSendEndpoint {
 }
 
 impl BootstrapSendEndpoint {
-    /// TODO
+
+    /// Build a new bootstrap send endpoint
     pub fn new(state_tx: Sender<Vec<(usize,Vec<u8>)>>, range_req_rx: Receiver<ProgressUpdatesRange>, range_ans_tx: Sender<Vec<u8>>, _server_index: usize) -> Self {
         BootstrapSendEndpoint {
             state_tx,
@@ -26,7 +29,8 @@ impl BootstrapSendEndpoint {
     }
 }
 
-/// TODO
+/// Collection of channels to recv encoded data (related to progress tracking)
+/// from the bootstrap_worker_client by a worker thread. Used by a worker thread.
 pub struct BootstrapRecvEndpoint {
     state_rx: Receiver<Vec<(usize, Vec<u8>)>>,
     range_req_tx: Sender<ProgressUpdatesRange>,
@@ -35,7 +39,8 @@ pub struct BootstrapRecvEndpoint {
 }
 
 impl BootstrapRecvEndpoint {
-    /// TODO
+
+    /// Build a new bootstrap recv endpoint
     pub fn new(state_rx: Receiver<Vec<(usize,Vec<u8>)>>, range_req_tx: Sender<ProgressUpdatesRange>, range_ans_rx: Receiver<Vec<u8>>, server_index: usize) -> Self {
         BootstrapRecvEndpoint {
             state_rx,

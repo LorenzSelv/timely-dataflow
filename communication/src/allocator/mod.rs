@@ -55,7 +55,7 @@ impl <F: FnOnce(&mut TcpStream)> BootstrapSendStateClosure for F {}
 pub trait BootstrapGetUpdatesRangeClosure : Fn(&ProgressUpdatesRange) -> Option<Vec<u8>> {}
 impl <F: Fn(&ProgressUpdatesRange) -> Option<Vec<u8>>> BootstrapGetUpdatesRangeClosure for F {}
 
-/// TODO(lorenzo) doc
+/// Alias trait for the done_closure (signaling the end of the protocol) expected by the `rescale` function.
 pub trait BootstrapDoneClosure : FnOnce() {}
 impl <F: FnOnce()> BootstrapDoneClosure for F {}
 
