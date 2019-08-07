@@ -93,7 +93,7 @@ pub fn start_connections(addresses: Arc<Vec<String>>, my_index: usize, noisy: bo
                     break Some(stream);
                 },
                 Err(error) => {
-                    println!("worker {}:\terror connecting to worker {}: {}; retrying", my_index, index, error);
+                    eprintln!("worker {}:\terror connecting to worker {}: {}; retrying", my_index, index, error);
                     sleep(Duration::from_secs(1));
                 },
             }

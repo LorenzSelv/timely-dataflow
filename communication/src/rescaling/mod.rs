@@ -54,7 +54,7 @@ pub fn rescaler(
 
         let bootstrap_addrs = recv_bootstrap_addr(&mut stream, my_process_index, threads);
 
-        println!("worker {}:\tconnection from worker {}, bootstrap address is {:?}", my_process_index, new_worker_index, bootstrap_addrs);
+        eprintln!("worker {}:\tconnection from worker {}, bootstrap address is {:?}", my_process_index, new_worker_index, bootstrap_addrs);
 
         // For queues from worker threads to the send network thread
         let (mut network_promise, worker_futures) = crate::promise_futures(1, threads);

@@ -78,11 +78,11 @@ pub fn start_connection(my_index: usize, address: SocketAddrV4) -> TcpStream {
         match TcpStream::connect(address) {
             Ok(mut stream) => {
                 send_handshake(&mut stream, my_index);
-                println!("[bootstrap server -- W{}] connected to new worker at {}", my_index, address);
+                eprintln!("[bootstrap server -- W{}] connected to new worker at {}", my_index, address);
                 break stream
             },
             Err(error) => {
-                println!("[bootstap server -- W{}] error connecting to new worker at {}: {}", my_index, address, error);
+                eprintln!("[bootstap server -- W{}] error connecting to new worker at {}: {}", my_index, address, error);
                 std::thread::sleep(std::time::Duration::from_millis(1));
             },
         }
@@ -93,7 +93,7 @@ fn await_connection(address: SocketAddrV4) -> TcpStream {
     let listener = TcpListener::bind(address).expect("bind error");
     let mut stream = listener.accept().expect("accept error").0;
     let identifier = recv_handshake(&mut stream).expect("recv handshake error");
-    println!("[bootstrap client] connected to worker {}", identifier);
+    eprintln!("[bootstrap client] connected to worker {}", identifier);
     stream
 }
 
@@ -195,7 +195,7 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
             let range_ans_buf = range_cache.entry(range_req.clone()).or_insert_with(|| {
                 // (0) send range requests
                 encode_write(&mut tcp_stream, &range_req);
-                println!("[bootstrap_worker_client] sent range request to bootstrap_server: {:?}", range_req);
+                eprintln!("[bootstrap_worker_client] sent range request to bootstrap_server: {:?}", range_req);
 
                 // (1) read size of the encoded updates_range
                 let range_ans_size = read_decode(&mut tcp_stream);
@@ -212,6 +212,6 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
             endpoint.range_ans_tx.send(range_ans_buf.clone()).expect("send failed");
         }
 
-        println!("done bootstrapping a worker");
+        eprintln!("done bootstrapping a worker");
     }
 }

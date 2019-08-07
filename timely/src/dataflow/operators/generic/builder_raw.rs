@@ -76,7 +76,7 @@ impl<G: Scope> OperatorBuilder<G> {
         address.push(index);
         let init_peers = scope.init_peers();
 
-        println!("Operator shape has init_peers = {}", init_peers);
+        eprintln!("Operator shape has init_peers = {}", init_peers);
 
         OperatorBuilder {
             scope,
@@ -246,7 +246,7 @@ where
             .iter_mut()
             .for_each(|output| output.update(Default::default(), self.shape.init_peers as i64));
             // TODO(lorenzo) important
-        println!("self.shape.init_peers is {}", self.shape.init_peers);
+        eprintln!("self.shape.init_peers is {}", self.shape.init_peers);
 
         (self.summary.clone(), self.shared_progress.clone())
     }

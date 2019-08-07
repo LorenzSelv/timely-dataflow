@@ -288,7 +288,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
         // try receiving from the rescale thread - did any new worker process initiated a connection?
         if let Ok(rescale_message) = self.rescaler_rx.try_recv() {
 
-            println!("[rescale] rescale_message is {:?}", rescale_message);
+            eprintln!("[rescale] rescale_message is {:?}", rescale_message);
 
             let RescaleMessage { promise, future, bootstrap_addr } = rescale_message;
 
@@ -359,7 +359,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                     // loop until the client closes the connection
                     // TODO maybe send some close message instead
                     if read == 0 {
-                        println!("bootstrap worker server done!");
+                        eprintln!("bootstrap worker server done!");
                         break;
                     } else {
                         assert_eq!(read, request_buf.len());
@@ -367,14 +367,14 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
                         let (range_req, remaining) = unsafe { abomonation::decode::<ProgressUpdatesRange>(&mut request_buf[..]) }.expect("decode error");
                         assert_eq!(remaining.len(), 0);
 
-                        println!("got update_range request: {:?}", range_req);
+                        eprintln!("got update_range request: {:?}", range_req);
 
                         let updates_range = loop {
                             if let Some(updates_range) = get_updates_range_clj(range_req) {
                                 break updates_range;
                             } else {
                                 // If the range request could not be satisfied, try to receive new messages from the socket.
-                                println!("loop.receive");
+                                eprintln!("loop.receive");
                                 std::thread::sleep(std::time::Duration::from_millis(10));
                                 self.receive();
                             }

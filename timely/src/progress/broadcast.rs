@@ -57,7 +57,7 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let change_batch = typed.clone();
         let (typed, remaining) = unsafe { abomonation::decode::<Vec<(usize,usize)>>(&mut remaining) }.expect("decode error");
         let worker_seqno: HashMap<usize,usize> = typed.iter().map(|&x| x).collect();
-        println!("[decode] received worker_seqno = {:?}", worker_seqno);
+        eprintln!("[decode] received worker_seqno = {:?}", worker_seqno);
         assert_eq!(remaining.len(), 0);
         ProgressState {
             acc_updates: change_batch.clone(),
@@ -74,7 +74,7 @@ impl<T: Timestamp+Abomonation> ProgressState<T> {
         let worker_index = progress_msg.0;
         let seq_no = progress_msg.1;
         let progress_vec = &progress_msg.2;
-        println!("[W{}] recved  ProgressMsg from w={} with seqno={} changes={:?}", my_index, worker_index, seq_no, progress_vec);
+        eprintln!("[W{}] recved  ProgressMsg from w={} with seqno={} changes={:?}", my_index, worker_index, seq_no, progress_vec);
 
         // make sure the message is the next message we expect to read
         if let Some(expected_seqno) = self.worker_seqno.insert(worker_index, seq_no + 1) {
@@ -142,7 +142,7 @@ impl<T: Timestamp+Abomonation> Abomonation for ProgressRecorder<T> {}
 impl<T: Timestamp+Abomonation> ProgressRecorder<T> {
 
     fn has_updates_range(&mut self, range: &ProgressUpdatesRange) -> bool {
-        println!("[has_updates_range] asked for {:?} -- worker_msgs is {:?}", range, self.worker_msgs.iter().map(|(w,msgs)| (w, msgs.iter().map(|msg| msg.1).collect::<Vec<_>>())).collect::<Vec<_>>());
+        eprintln!("[has_updates_range] asked for {:?} -- worker_msgs is {:?}", range, self.worker_msgs.iter().map(|(w,msgs)| (w, msgs.iter().map(|msg| msg.1).collect::<Vec<_>>())).collect::<Vec<_>>());
 
         let msgs = self.worker_msgs.entry(range.worker_index).or_insert(Vec::new());
 
@@ -247,7 +247,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
                 let mut bootstrap_message = None;
                 let seqno = *(*counter1).borrow();
                 Progcaster::fill_message(&mut bootstrap_message, worker_index, seqno, &mut ChangeBatch::new());
-                println!("[W{}] BOOTSTRAP MESSAGE seqno={}", worker_index, seqno);
+                eprintln!("[W{}] BOOTSTRAP MESSAGE seqno={}", worker_index, seqno);
                 pusher.push(&mut bootstrap_message);
                 // (we do not increment the seqno, this is just a "flag" message
             }
@@ -296,7 +296,7 @@ impl<T:Timestamp+Send> Progcaster<T> {
         changes.compact();
         if !changes.is_empty() {
 
-            println!("[W{}] sending ProgressMsg with seqno={} changes={:?}", self.source, *(*self.counter).borrow(), changes.clone().into_inner());
+            eprintln!("[W{}] sending ProgressMsg with seqno={} changes={:?}", self.source, *(*self.counter).borrow(), changes.clone().into_inner());
             self.logging.as_ref().map(|l| l.log(crate::logging::ProgressEvent {
                 is_send: true,
                 is_duplicate: false,
@@ -533,7 +533,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
                 assert_eq!(recv_changes.len(), 0);
                 worker_todo.remove(&worker_index);
 
-                println!("Got bootstrap message: worker={} seqno={}", worker_index, msg_seqno);
+                eprintln!("Got bootstrap message: worker={} seqno={}", worker_index, msg_seqno);
 
                 if state_seqno < msg_seqno {
                     // state is behind of the direct connection with `worker_index`

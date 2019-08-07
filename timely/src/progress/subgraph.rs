@@ -331,16 +331,16 @@ where
             self.activations.borrow_mut().activate(&self.path[..]);
         }
 
-        println!("[subgraph::schedule]");
-        println!("  progress_state acc is");
+        eprintln!("[subgraph::schedule]");
+        eprintln!("  progress_state acc is");
         for x in self.progcaster.borrow_mut().progress_state.acc_updates.iter() {
-            println!("    {:?}", x);
+            eprintln!("    {:?}", x);
         }
-        println!("  progress_state delta is");
+        eprintln!("  progress_state delta is");
         for x in self.progcaster.borrow_mut().progress_state.delta_updates.iter() {
-            println!("    {:?}", x);
+            eprintln!("    {:?}", x);
         }
-        println!("  incomplete_count = {}", self.incomplete_count);
+        eprintln!("  incomplete_count = {}", self.incomplete_count);
 
         // A subgraph is incomplete if any child is incomplete, or there are outstanding messages.
         let incomplete = self.incomplete_count > 0;
@@ -371,18 +371,18 @@ where
             self.incomplete[child_index] = incomplete;
         }
 
-        println!("[subgraph::activate_child] operator index={} name={}", child.index, child.name);
-        println!("  complete={}", !incomplete);
+        eprintln!("[subgraph::activate_child] operator index={} name={}", child.index, child.name);
+        eprintln!("  complete={}", !incomplete);
 
         if !incomplete {
             // Consider shutting down the child, if neither capabilities nor input frontier.
             let child_state = self.pointstamp_tracker.node_state(child_index);
             let frontiers_empty = child_state.targets.iter().all(|x| x.implications.is_empty());
             let no_capabilities = child_state.sources.iter().all(|x| x.pointstamps.is_empty());
-            println!("  input frontiers = {:?}", child_state.targets.iter().map(|x| x.implications.clone()).collect::<Vec<_>>());
-            println!("  output cap      = {:?}", child_state.sources.iter().map(|x| x.pointstamps.clone()).collect::<Vec<_>>());
+            eprintln!("  input frontiers = {:?}", child_state.targets.iter().map(|x| x.implications.clone()).collect::<Vec<_>>());
+            eprintln!("  output cap      = {:?}", child_state.sources.iter().map(|x| x.pointstamps.clone()).collect::<Vec<_>>());
             if frontiers_empty && no_capabilities {
-                println!("  => SHUT DOWN");
+                eprintln!("  => SHUT DOWN");
                 child.shut_down();
             }
         }

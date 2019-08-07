@@ -34,3 +34,7 @@ rand="0.4"
 [[example]]
 name="rescaling_hello"
 path="examples/rescaling/hello.rs"
+
+[[example]]
+name="rescaling_two_dataflows"
+path="examples/rescaling/two_dataflows.rs"
