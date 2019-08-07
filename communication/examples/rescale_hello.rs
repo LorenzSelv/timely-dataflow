@@ -47,7 +47,7 @@ fn main() {
         println!("worker {} of {} started", allocator.index(), allocator.peers());
 
         // If in cluster mode, channel allocations might have to be updated dynamically.
-        // See `rescaling_hello.rs` for a more detailed explanation for the need of the closure below.
+        // See `hello.rs` for a more detailed explanation for the need of the closure below.
         let senders1 = Rc::new(RefCell::new(Vec::new()));
         let senders2 = Rc::clone(&senders1);
 

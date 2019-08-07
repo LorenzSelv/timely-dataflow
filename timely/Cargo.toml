@@ -33,4 +33,4 @@ rand="0.4"
 
 [[example]]
 name="rescaling_hello"
-path="examples/rescaling/rescaling_hello.rs"
+path="examples/rescaling/hello.rs"
