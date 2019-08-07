@@ -332,6 +332,14 @@ where
         }
 
         println!("[subgraph::schedule]");
+        println!("  progress_state acc is");
+        for x in self.progcaster.borrow_mut().progress_state.acc_updates.iter() {
+            println!("    {:?}", x);
+        }
+        println!("  progress_state delta is");
+        for x in self.progcaster.borrow_mut().progress_state.delta_updates.iter() {
+            println!("    {:?}", x);
+        }
         println!("  incomplete_count = {}", self.incomplete_count);
 
         // A subgraph is incomplete if any child is incomplete, or there are outstanding messages.

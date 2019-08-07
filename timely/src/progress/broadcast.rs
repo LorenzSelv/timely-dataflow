@@ -12,12 +12,13 @@ use abomonation::Abomonation;
 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ProgressState<T: Timestamp> {
+/// TODO(lorenzo) make private again
+pub struct ProgressState<T: Timestamp> {
     /// compacted ChangeBatch: all updates ever sent/recved accumulated
-    acc_updates: ChangeBatch<(Location, T)>,
+    pub acc_updates: ChangeBatch<(Location, T)>,
 
     /// delta ChangeBatch: cleared every time progcaster.recv() is called
-    delta_updates: ChangeBatch<(Location, T)>,
+    pub delta_updates: ChangeBatch<(Location, T)>,
 
     /// hashmap of (worker_index) -> SeqNo
     ///                 ^source in the message
@@ -212,7 +213,7 @@ pub struct Progcaster<T:Timestamp> {
     channel_identifier: usize,
 
     /// we need to maintain accumulate state, so that we can bootstrap workers during rescaling
-    progress_state: ProgressState<T>,
+    pub progress_state: ProgressState<T>,
 
     recorder: ProgressRecorder<T>,
     is_recording: bool,
@@ -522,7 +523,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
             let msg_seqno = message.1;
             let recv_changes = &message.2;
 
-            // state_seq_no is the next message that we should read and apply to the state
+            // state_seqno is the next message seqno that we should read and apply to the state
             let state_seqno = *progcaster.progress_state.worker_seqno.get(&worker_index).unwrap_or(&0_usize);
 
             if worker_todo.contains(&worker_index) {
@@ -546,15 +547,16 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
                     };
                     Some(missing_range)
                 } else {
-                    // Other workers are still making progress, so they might send more progress updates
-                    // before all workers get the chance to send their init_message.
-                    // If that's the case we need to update the progress_state, but we need to make
-                    // sure that all updates from that worker have been already integrated in the progress state.
-                    // This is guaranteed if we fulfill the missing range request before pulling again.
-                    progcaster.progress_state.update(message, progcaster.source);
+                    // Message is a bootstrap message (contains no updates) and the state is up-to-date, nothing to do.
                     None
                 }
             } else {
+                // Message is not a bootstrap message.
+                // Other workers are still making progress, so they might send more progress updates
+                // before all workers get the chance to send their bootstrap message.
+                // If that's the case we need to update the progress_state, but we need to make
+                // sure that all updates from that worker have been already integrated in the progress state.
+                // This is guaranteed if we fulfill the missing range request before pulling again.
                 progcaster.progress_state.update(message, progcaster.source);
                 None
             }
