@@ -38,3 +38,7 @@ path="examples/rescaling/hello.rs"
 [[example]]
 name="rescaling_two_dataflows"
 path="examples/rescaling/two_dataflows.rs"
+
+[[example]]
+name="rescaling_nested"
+path="examples/rescaling/nested.rs"

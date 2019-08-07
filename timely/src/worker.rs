@@ -555,20 +555,20 @@ impl<A: Allocate> Worker<A> {
                 let mut worker_todo: HashSet<usize> = progcaster.get_worker_indices();
 
                 while !worker_todo.is_empty() {
-                    println!("workers left: {:?}", worker_todo);
+                    eprintln!("workers left: {:?}", worker_todo);
 
                     // make received messages surface in puller channels
                     self.allocator.borrow_mut().receive();
 
                     if let Some(missing_range) = progcaster.get_missing_updates_range(&mut worker_todo) {
                         bootstrap_endpoint.send_range_request(missing_range.clone());
-                        println!("[W{}] sent updates range {:?}", self.index(), missing_range);
+                        eprintln!("[W{}] sent updates range {:?}", self.index(), missing_range);
 
                         let response = bootstrap_endpoint.recv_range_response();
-                        println!("[W{}] got updates range response", self.index());
+                        eprintln!("[W{}] got updates range response", self.index());
 
                         progcaster.apply_updates_range(missing_range, response);
-                        println!("[W{}] applied updates range response", self.index());
+                        eprintln!("[W{}] applied updates range response", self.index());
                     }
                 }
             }
