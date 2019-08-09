@@ -42,3 +42,7 @@ path="examples/rescaling/two_dataflows.rs"
 [[example]]
 name="rescaling_nested"
 path="examples/rescaling/nested.rs"
+
+[[example]]
+name="rescaling_unary"
+path="examples/rescaling/unary.rs"
