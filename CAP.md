@@ -89,3 +89,20 @@ Summary:
   so that they will not be able to produce input for past times. Attempt to do so will `panic`, which is gut.
 * `new_unordered_input` should mint a capability for the current timestamp (like other input handles in `scope::input_from`).
 * TODO other places?
+
+Problem: current time is only available after bootstrapping, but bootstrapping needs the dataflow graph
+=> we have to init capabilities with default values and during the call to `worker::bootstrap` back-fix the values
+
+Also:
+`Capability` should be a wrapper to a shared `Rc<RefCell<>>` handle
+
+* all method invocations minting capabilities should return handles to which we keep track in the object itself
+  in order to propagate downgrade/revocations of parent capabilities.
+
+* what if you drop the parent capability?
+
+Problem: notification have already been requested, ~~output might have already being emitted~~ the output handle
+is only available when scheduled, not while building the dataflow => at that point `worker::bootstrap` has been called already.
+=> notificator filters out invalid notifications (associated with downgraded/revoked capabilities) before delivering notifications.
+
+

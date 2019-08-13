@@ -85,6 +85,7 @@ impl<G: Scope> UnorderedInput<G> for G {
         let (output, registrar) = Tee::<G::Timestamp, D>::new();
         let internal = Rc::new(RefCell::new(ChangeBatch::new()));
         // let produced = Rc::new(RefCell::new(ChangeBatch::new()));
+        // TODO(lorenzo) scope needs to keep an handle to this capability, so that it can change it (e.g. downgrade to the actual current time during bootstrap)
         let cap = mint_capability(Default::default(), internal.clone());
         let counter = PushCounter::new(output);
         let produced = counter.produced().clone();
