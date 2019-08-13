@@ -26,7 +26,7 @@ abomonation_derive = "0.3"
 timely_bytes = { path = "../bytes", version = "0.9" }
 timely_logging = { path = "../logging", version = "0.9" }
 timely_communication = { path = "../communication", version = "0.9" }
-colored = "1.8.0"
+colored = "1.8.0" # TODO(lorenzo) for debugging -- remove me!
 
 [dev-dependencies]
 timely_sort="0.1.6"
