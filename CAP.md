@@ -82,27 +82,61 @@ TODO: do we want the (timestamp::default(), -1) update ? probably not if we are 
 
 
 Summary:
-* operators should be initialized with (output) capabilities at the current time `t'` for that operator source (output) at the bootstrap server
-* the bootstrap server emits a progress update `(t', +1)`: this is correct as it has not gone past that timestamp and every other worker will
-  have to wait until the new bootstrapped worker has downgraded/dropped/advanced past that timestamp (i.e. emitted `(t', -1)`)
-* input handles are created with the default timestamp. However, when they are registered as the input of some scope (`scope::input_from`) the time is advanced accordingly,
-  so that they will not be able to produce input for past times. Attempt to do so will `panic`, which is gut.
-* `new_unordered_input` should mint a capability for the current timestamp (like other input handles in `scope::input_from`).
+* operators _should_ be initialized with (output) capabilities at the current time `t'` for that operator source (output) at the bootstrap server.
+  Unfortunately, at the time of building the dataflow graph this information is not available yet: we discover `t` only after bootstrapping, which in turn
+  needs the dataflow graph to have been built already. Chicken-and-egg problem.
+  Solution: we initialize with the default timestamp, we keep an handle to every minted capability, we downgrade the capabilities after bootstrapping
+  according to the actual current time `t`.
+  
+* `input_handles` are created with the default timestamp. They are then registered as input of (potentially more than one) dataflows (`scope::input_from`).
+   During the registration we store an handle to the capability so that we can downgrade it later (same reasoning as above).
+   During bootstrapping, we downgrade the capability as above.
+   (TODO: note that this would cause a problem if downgrading the second time. We need to downgrade iff the current time is actually lower that the downgraded-to time).
+  
+* `new_unordered_input` mints a capability for the default timestamp, which is then downgraded according using the stored handle 
+
 * TODO other places?
 
-Problem: current time is only available after bootstrapping, but bootstrapping needs the dataflow graph
-=> we have to init capabilities with default values and during the call to `worker::bootstrap` back-fix the values
+==============================
+Things to deal with:
 
-Also:
-`Capability` should be a wrapper to a shared `Rc<RefCell<>>` handle
+1) We need to acquire this "actual current time `t`" during bootstrapping
+  
+    * the bootstrap server emits a progress update `(t', +1)` to `shared_progress.internal` (internal capabilities):
+      it is allowed to do so as it has not gone past that timestamp.
+      Since the bootstrap server will not emit the corresponding decrement `(t', -1)`, other workers will
+      have to wait until the newly bootstrapped worker has downgraded/dropped/advanced past that timestamp (i.e. emitted `(t', -1)`).
+      
+------------------------------
 
-* all method invocations minting capabilities should return handles to which we keep track in the object itself
-  in order to propagate downgrade/revocations of parent capabilities.
+2) Capability can be cloned, delayed, dropped. We need to make sure we handle all such cases in the "keep an handle" mechanism.
 
-* what if you drop the parent capability?
+  `Capability` should be a wrapper to a shared `Rc<RefCell<>>` handle
+  ...TODO
 
-Problem: notification have already been requested, ~~output might have already being emitted~~ the output handle
-is only available when scheduled, not while building the dataflow => at that point `worker::bootstrap` has been called already.
-=> notificator filters out invalid notifications (associated with downgraded/revoked capabilities) before delivering notifications.
+------------------------------
+  
+3) method should be safe also if someone uses the operator builder directly
+  
+------------------------------
+
+############################################################################
+
+ALTERNATIVE
+===========
+
+* New worker has no capability at all!
+
+* All notifications are cancelled
+
+* `Capability` API should be changed to be a bit more defensive: invocations should not panic, but instead return some `Result<>`.
+    - Normal usage (no rescaling) can achieve the same effect by adding something like `.expect("cap operation failed")`
+    - Rescaling-oriented usage should handle error cases and do nothing if it has no capabilities.
+    
+* Operator, upon receiving input, are provided with capabilities (already in the current implementation) which allow them
+  to produce output, request notifications, etc.
+  
+
+
 
 

@@ -107,7 +107,12 @@ impl<G: Scope> OperatorBuilder<G> {
         let mut capabilities = Vec::new();
         for output_index in 0  .. self.internal.borrow().len() {
             let borrow = &self.internal.borrow()[output_index];
-            // TODO(lorenzo) if joining a cluster, we should mint a cap for the current time
+            // TODO(lorenzo) if joining a cluster, we should mint a cap for the current time `t`
+            //               but we don't know `t` yet: we find out after building the dataflow
+            //               and calling bootstrap
+            //               => mint cap for the default value
+            //               => keep handle to the minted capability in the scope (we have a ref to it)
+            //               => downgraded the capability later to the actual time (worker::bootstrap call)
             capabilities.push(mint_capability(Default::default(), borrow.clone()));
             // Discard evidence of creation, as we are assumed to start with one.
             borrow.borrow_mut().clear();
