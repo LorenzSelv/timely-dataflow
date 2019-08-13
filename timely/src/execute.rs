@@ -199,6 +199,8 @@ where
         }
 
         let result = func(&mut worker);
+        // TODO(lorenzo) maybe call worker.bootstrap() here, it's not a problem if it has already been
+        //               called, since the endpoint was replaced with None (=> the second time would be a no-op)
         while worker.step_or_park(None) { }
         result
     })

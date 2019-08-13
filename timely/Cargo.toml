@@ -26,6 +26,7 @@ abomonation_derive = "0.3"
 timely_bytes = { path = "../bytes", version = "0.9" }
 timely_logging = { path = "../logging", version = "0.9" }
 timely_communication = { path = "../communication", version = "0.9" }
+colored = "1.8.0"
 
 [dev-dependencies]
 timely_sort="0.1.6"
@@ -46,3 +47,7 @@ path="examples/rescaling/nested.rs"
 [[example]]
 name="rescaling_unary"
 path="examples/rescaling/unary.rs"
+
+[[example]]
+name="rescaling_unary_notify"
+path="examples/rescaling/unary_notify.rs"

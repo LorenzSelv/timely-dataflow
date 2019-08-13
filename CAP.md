@@ -67,7 +67,25 @@ it checks that the capability is `valid_for_output`
 
 ------------------------------------------------------------------------------
 `InputHandle` mints capref when pulling something from the channel: receiving
-input allows you to produce output. TODO: Why is this safe?
+input allows you to produce output. This is _relatively_ safe if everything else is done properly,
+i.e. no-one can produce output for time timestamps.
 
-However, if you don't receive input you should produce output only
-for timestamp you hold capabilities for.
+Thus, we need to constrain the capabilities each operator of a new worker has.
+
+`scope.input_from` should ensure the supplied input handle will produce only input for current or future timestamps.
+Options:
+* call the `advance_to` with the current timestamp (the bootstrap server should ensure that the global frontier would not advance further, we should
+emit a progress update (current t at input, +1) so that everybody has to wait for the new worker to send the corresponding (t, -1) before consider the epoch closed)
+* assign `now_at` directly with the new timestamp
+
+TODO: do we want the (timestamp::default(), -1) update ? probably not if we are consistent with the operator's capabilities (which should be initialized)
+
+
+Summary:
+* operators should be initialized with (output) capabilities at the current time `t'` for that operator source (output) at the bootstrap server
+* the bootstrap server emits a progress update `(t', +1)`: this is correct as it has not gone past that timestamp and every other worker will
+  have to wait until the new bootstrapped worker has downgraded/dropped/advanced past that timestamp (i.e. emitted `(t', -1)`)
+* input handles are created with the default timestamp. However, when they are registered as the input of some scope (`scope::input_from`) the time is advanced accordingly,
+  so that they will not be able to produce input for past times. Attempt to do so will `panic`, which is gut.
+* `new_unordered_input` should mint a capability for the current timestamp (like other input handles in `scope::input_from`).
+* TODO other places?

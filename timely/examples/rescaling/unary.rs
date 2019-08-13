@@ -12,7 +12,6 @@ fn main() {
 
         let index = worker.index();
 
-        // circulate numbers, Collatz stepping each time.
         worker.dataflow(|scope| {
             scope
                 .input_from(&mut input)
