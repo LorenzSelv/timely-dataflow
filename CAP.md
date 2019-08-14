@@ -127,12 +127,13 @@ ALTERNATIVE
 
 * New worker has no capability at all!
     - Change all APIs to accept an Option<Capability> instead: mint them only if *not* in rescale mode
-    - Is it enough to store a flag in the Scope?
-       - yes for operator [DONE]
-       - yes for unordered input [DONE]
-       - TODO input handle? [TODO]
-       - TODO probe [TODO]
-       - TODO all usages of builder_raw [TODO]
+    
+* places to adapt:
+    - generic operators [DONE]
+    - unordered input [DONE]
+    - input handle [DONE]
+    - probe [DONE]
+    - all usages of builder_raw [TODO]
 
 * All notifications are cancelled
 

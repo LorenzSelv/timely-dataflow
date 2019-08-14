@@ -97,6 +97,8 @@ impl<G: Scope, D: Data> Probe<G, D> for Stream<G, D> {
         let frontier = handle.frontier.clone();
         let mut started = false;
 
+        let is_rescaling = self.scope().is_rescaling();
+
         let mut vector = Vec::new();
 
         builder.build(
@@ -106,7 +108,8 @@ impl<G: Scope, D: Data> Probe<G, D> for Stream<G, D> {
             },
             move |consumed, internal, produced| {
 
-                if !started {
+                if !started && !is_rescaling {
+                    // we drop the capability only if we have it: in rescaling mode we don't
                     internal[0].update(Default::default(), -1);
                     started = true;
                 }
