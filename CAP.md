@@ -135,7 +135,7 @@ ALTERNATIVE
     - probe [DONE]
     - all usages of builder_raw [DONE]
 
-* All notifications are cancelled
+* No notification can be setup without capabilities
 
 * Operator, upon receiving input, are provided with capabilities (already in the current implementation) which allow them
   to produce output, request notifications, etc.
