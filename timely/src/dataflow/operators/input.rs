@@ -93,6 +93,8 @@ pub trait Input : Scope {
 }
 
 use crate::order::TotalOrder;
+use crate::dataflow::operators::generic::operator::empty;
+
 impl<G: Scope> Input for G where <G as ScopeParent>::Timestamp: TotalOrder {
     fn new_input<D: Data>(&mut self) -> (Handle<<G as ScopeParent>::Timestamp, D>, Stream<G, D>) {
         let mut handle = Handle::new();
@@ -103,32 +105,37 @@ impl<G: Scope> Input for G where <G as ScopeParent>::Timestamp: TotalOrder {
     // TODO(lorenzo) replace output stream with `empty` ?
     fn input_from<D: Data>(&mut self, handle: &mut Handle<<G as ScopeParent>::Timestamp, D>) -> Stream<G, D> {
 
-        let (output, registrar) = Tee::<<G as ScopeParent>::Timestamp, D>::new();
-        let counter = Counter::new(output);
-        let produced = counter.produced().clone();
+        if self.is_rescaling() {
+            // new worker joining the cluster are not allowed to inject input for now
+            empty(&self)
+        } else {
+            let (output, registrar) = Tee::<<G as ScopeParent>::Timestamp, D>::new();
+            let counter = Counter::new(output);
+            let produced = counter.produced().clone();
 
-        let index = self.allocate_operator_index();
-        let mut address = self.addr();
-        address.push(index);
+            let index = self.allocate_operator_index();
+            let mut address = self.addr();
+            address.push(index);
 
-        handle.activate.push(self.activator_for(&address[..]));
+            handle.activate.push(self.activator_for(&address[..]));
 
-        let progress = Rc::new(RefCell::new(ChangeBatch::new()));
+            let progress = Rc::new(RefCell::new(ChangeBatch::new()));
 
-        handle.register(counter, progress.clone());
+            handle.register(counter, progress.clone());
 
-        let copies = self.peers();
+            let copies = self.peers();
 
-        self.add_operator_with_index(Box::new(Operator {
-            name: "Input".to_owned(),
-            address,
-            shared_progress: Rc::new(RefCell::new(SharedProgress::new(0, 1))),
-            progress,
-            messages: produced,
-            copies,
-        }), index);
+            self.add_operator_with_index(Box::new(Operator {
+                name: "Input".to_owned(),
+                address,
+                shared_progress: Rc::new(RefCell::new(SharedProgress::new(0, 1))),
+                progress,
+                messages: produced,
+                copies,
+            }), index);
 
-        Stream::new(Source { index, port: 0 }, registrar, self.clone())
+            Stream::new(Source { index, port: 0 }, registrar, self.clone())
+        }
     }
 }
 
@@ -161,7 +168,7 @@ impl<T:Timestamp> Operate<T> for Operator<T> {
     fn outputs(&self) -> usize { 1 }
 
     fn get_internal_summary(&mut self) -> (Vec<Vec<Antichain<<T as Timestamp>::Summary>>>, Rc<RefCell<SharedProgress<T>>>) {
-        self.shared_progress.borrow_mut().internals[0].update(Default::default(), self.copies as i64);
+        self.shared_progress.borrow_mut().internals[0].update(Default::default(), self.copies as i64); // TODO(lorenzo) important
         (Vec::new(), self.shared_progress.clone())
     }
 
