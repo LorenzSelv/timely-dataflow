@@ -78,7 +78,7 @@ impl Generic {
     }
 
     /// Constructs several send endpoints and one receive endpoint.
-    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<dyn Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         match self {
@@ -145,7 +145,7 @@ impl Allocate for Generic {
     fn inner_peers(&self) -> usize { self.inner_peers() }
     fn init_peers(&self) -> usize { self.init_peers() }
     fn is_rescaling(&self) -> bool { self.is_rescaling() }
-    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<dyn Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         self.allocate(identifier, on_new_pusher)

@@ -44,8 +44,8 @@ pub trait AllocateBuilder : Send {
 /// to back-fill the channel allocation with new pushers.
 ///
 /// The actual back-filling is performed on-demand when calling the `rescale` function.
-pub trait OnNewPushFn<T>: FnMut(Box<Push<Message<T>>>) + 'static {}
-impl<T,                F: FnMut(Box<Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
+pub trait OnNewPushFn<T>: FnMut(Box<dyn Push<Message<T>>>) + 'static {}
+impl<T,                F: FnMut(Box<dyn Push<Message<T>>>) + 'static> OnNewPushFn<T> for F {}
 
 /// Alias trait for the send_state_closure expected by the `rescale` function.
 pub trait BootstrapSendStateClosure : FnOnce(&mut TcpStream) {}
@@ -76,7 +76,7 @@ pub trait Allocate {
     /// Indicates if we are in rescaling mode
     fn is_rescaling(&self) -> bool;
     /// Constructs several send endpoints and one receive endpoint.
-    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<dyn Pull<Message<T>>>
          where F: OnNewPushFn<T>;
 
     /// If a configuration change happens in the cluster, adapt existing channels to reflect that change.

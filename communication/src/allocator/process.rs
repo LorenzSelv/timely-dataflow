@@ -19,7 +19,7 @@ pub struct ProcessBuilder {
     index: usize,
     peers: usize,
     // below: `Box<Any+Send>` is a `Box<Vec<Option<(Vec<Sender<T>>, Receiver<T>)>>>`
-    channels: Arc<Mutex<HashMap<usize, Box<Any+Send>>>>,
+    channels: Arc<Mutex<HashMap<usize, Box<dyn Any+Send>>>>,
 
     // Buzzers for waking other local workers.
     buzzers_send: Vec<Sender<Buzzer>>,
@@ -61,7 +61,7 @@ pub struct Process {
     index: usize,
     peers: usize,
     // below: `Box<Any+Send>` is a `Box<Vec<Option<(Vec<Sender<T>>, Receiver<T>)>>>`
-    channels: Arc<Mutex<HashMap</* channel id */ usize, Box<Any+Send>>>>,
+    channels: Arc<Mutex<HashMap</* channel id */ usize, Box<dyn Any+Send>>>>,
     buzzers: Vec<Buzzer>,
     counters_send: Vec<Sender<(usize, Event)>>,
     counters_recv: Receiver<(usize, Event)>,
@@ -112,7 +112,7 @@ impl Allocate for Process {
     fn peers(&self) -> usize { self.peers }
     fn inner_peers(&self) -> usize { self.peers }
     fn is_rescaling(&self) -> bool { false }
-    fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<dyn Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         // this is race-y global initialisation of all channels for all workers, performed by the
@@ -168,10 +168,10 @@ impl Allocate for Process {
         sends.into_iter()
              .enumerate()
              .map(|(i,s)| CountPusher::new(s, identifier, self.counters_send[i].clone()))
-             .map(|s| Box::new(s) as Box<Push<super::Message<T>>>)
+             .map(|s| Box::new(s) as Box<dyn Push<super::Message<T>>>)
              .for_each(move |pusher| on_new_pusher(pusher));
 
-        let recv = Box::new(CountPuller::new(recv, identifier, self.inner.events().clone())) as Box<Pull<super::Message<T>>>;
+        let recv = Box::new(CountPuller::new(recv, identifier, self.inner.events().clone())) as Box<dyn Pull<super::Message<T>>>;
 
         recv
     }

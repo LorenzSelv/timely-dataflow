@@ -60,8 +60,8 @@ impl<D, F: FnMut(&D)->u64> Exchange<D, F> {
 impl<T: Eq+Data+Clone, D: Data+Clone, F: FnMut(&D)->u64+'static> ParallelizationContract<T, D> for Exchange<D, F> {
     // TODO: The closure in the type prevents us from naming it.
     //       Could specialize `ExchangePusher` to a time-free version.
-    type Pusher = Box<Push<Bundle<T, D>>>;
-    type Puller = Box<Pull<Bundle<T, D>>>;
+    type Pusher = Box<dyn Push<Bundle<T, D>>>;
+    type Puller = Box<dyn Pull<Bundle<T, D>>>;
     fn connect<A: AsWorker>(mut self, allocator: &mut A, identifier: usize, address: &[usize], logging: Option<Logger>) -> (Self::Pusher, Self::Puller) {
         let pushers1 = Rc::new(RefCell::new(Vec::with_capacity(allocator.peers())));
         let pushers2 = Rc::clone(&pushers1);

@@ -115,7 +115,7 @@ impl<T:Data> Pull<Message<T>> for Puller<T> {
 /// like the `bytes` crate (../bytes/) which provides an exclusive view of a shared
 /// allocation.
 pub struct PullerInner<T> {
-    inner: Box<Pull<Message<T>>>,               // inner pullable (e.g. intra-process typed queue)
+    inner: Box<dyn Pull<Message<T>>>,               // inner pullable (e.g. intra-process typed queue)
     _canary: Canary,
     current: Option<Message<T>>,
     receiver: Rc<RefCell<VecDeque<Bytes>>>,     // source of serialized buffers
@@ -123,7 +123,7 @@ pub struct PullerInner<T> {
 
 impl<T:Data> PullerInner<T> {
     /// Creates a new `PullerInner` instance from a shared queue.
-    pub fn new(inner: Box<Pull<Message<T>>>, receiver: Rc<RefCell<VecDeque<Bytes>>>, _canary: Canary) -> Self {
+    pub fn new(inner: Box<dyn Pull<Message<T>>>, receiver: Rc<RefCell<VecDeque<Bytes>>>, _canary: Canary) -> Self {
         PullerInner {
             inner,
             _canary,

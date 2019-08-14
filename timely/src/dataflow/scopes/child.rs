@@ -60,7 +60,7 @@ where
     fn init_peers(&self) -> usize { self.parent.init_peers() }
     fn inner_peers(&self) -> usize { self.parent.inner_peers() }
     fn is_rescaling(&self) -> bool { self.parent.is_rescaling() }
-    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
+    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<dyn Pull<Message<D>>>
         where F: OnNewPushFn<D>
     {
         self.parent.allocate(identifier, address, on_new_push)
@@ -105,7 +105,7 @@ where
         self.subgraph.borrow_mut().connect(source, target);
     }
 
-    fn add_operator_with_indices(&mut self, operator: Box<Operate<Self::Timestamp>>, local: usize, global: usize) {
+    fn add_operator_with_indices(&mut self, operator: Box<dyn Operate<Self::Timestamp>>, local: usize, global: usize) {
         self.subgraph.borrow_mut().add_child(operator, local, global);
     }
 

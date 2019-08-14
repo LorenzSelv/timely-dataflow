@@ -201,7 +201,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn inner_peers(&self) -> usize { self.inner.peers() }
     fn init_peers(&self) -> usize { self.init_peers }
     fn is_rescaling(&self) -> bool { self.is_rescaling }
-    fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_push: F) -> Box<Pull<Message<T>>>
+    fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_push: F) -> Box<dyn Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {
         // Inner exchange allocations.

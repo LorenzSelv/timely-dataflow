@@ -42,7 +42,7 @@ pub enum Configuration {
         /// If no rescaling operation has occurred, it's equal to addresses.len().
         init_processes: usize,
         /// Closure to create a new logger for a communication thread
-        log_fn: Box<Fn(CommunicationSetup) -> Option<Logger<CommunicationEvent, CommunicationSetup>> + Send + Sync>,
+        log_fn: Box<dyn Fn(CommunicationSetup) -> Option<Logger<CommunicationEvent, CommunicationSetup>> + Send + Sync>,
     }
 }
 
@@ -127,7 +127,7 @@ impl Configuration {
     }
 
     /// Attempts to assemble the described communication infrastructure.
-    pub fn try_build(self) -> Result<(Vec<GenericBuilder>, Box<Any>), String> {
+    pub fn try_build(self) -> Result<(Vec<GenericBuilder>, Box<dyn Any>), String> {
         match self {
             Configuration::Thread => {
                 Ok((vec![GenericBuilder::Thread(ThreadBuilder)], Box::new(())))
@@ -327,7 +327,7 @@ pub fn initialize<T:Send+'static, F: Fn(Generic)->T+Send+Sync+'static>(
 /// ```
 pub fn initialize_from<A, T, F>(
     builders: Vec<A>,
-    _others: Box<Any>,
+    _others: Box<dyn Any>,
     func: F,
 ) -> Result<WorkerGuards<T>,String>
 where
@@ -354,7 +354,7 @@ where
 /// Maintains `JoinHandle`s for worker threads.
 pub struct WorkerGuards<T:Send+'static> {
     guards: Vec<::std::thread::JoinHandle<T>>,
-    _others: Box<Any>,
+    _others: Box<dyn Any>,
 }
 
 impl<T:Send+'static> WorkerGuards<T> {

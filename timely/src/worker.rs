@@ -48,7 +48,7 @@ pub trait AsWorker : Scheduler {
     /// scheduled in response to the receipt of records on the channel.
     /// Most commonly, this would be the address of the *target* of the
     /// channel.
-    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
+    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<dyn Pull<Message<D>>>
         where F: OnNewPushFn<D>;
     /// Constructs a pipeline channel from the worker to itself.
     ///
@@ -97,7 +97,7 @@ impl<A: Allocate> AsWorker for Worker<A> {
     fn init_peers(&self) -> usize { self.allocator.borrow().init_peers() }
     fn inner_peers(&self) -> usize { self.allocator.borrow().inner_peers() }
     fn is_rescaling(&self) -> bool { self.allocator.borrow().is_rescaling() }
-    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
+    fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<dyn Pull<Message<D>>>
         where F: OnNewPushFn<D>
     {
         if address.len() == 0 { panic!("Unacceptable address: Length zero"); }
@@ -611,8 +611,8 @@ impl<A: Allocate> Clone for Worker<A> {
 struct Wrapper {
     logging: Option<TimelyLogger>,
     identifier: usize,
-    operate: Option<Box<Schedule>>,
-    resources: Option<Box<Any>>,
+    operate: Option<Box<dyn Schedule>>,
+    resources: Option<Box<dyn Any>>,
     channel_ids: Vec<usize>,
 }
 

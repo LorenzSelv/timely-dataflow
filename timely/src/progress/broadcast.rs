@@ -199,7 +199,7 @@ pub struct Progcaster<T:Timestamp> {
 
     // TODO(lorenzo): this will become an hashmap, and we get the IDs from there
     //                for now we assume indices are [0..pushers.len()[
-    pushers: Rc<RefCell<Vec<Box<Push<ProgressMsg<T>>>>>>,
+    pushers: Rc<RefCell<Vec<Box<dyn Push<ProgressMsg<T>>>>>>,
     puller: Box<Pull<ProgressMsg<T>>>,
     /// Source worker index
     source: usize,
@@ -409,7 +409,7 @@ pub trait ProgcasterServerHandle {
     fn get_updates_range(&self, range: &ProgressUpdatesRange) -> Option<Vec<u8>>;
 
     /// Return a boxed clone of this handle.
-    fn boxed_clone(&self) -> Box<ProgcasterServerHandle>;
+    fn boxed_clone(&self) -> Box<dyn ProgcasterServerHandle>;
 }
 
 impl Clone for Box<ProgcasterServerHandle> {
@@ -436,10 +436,10 @@ pub trait ProgcasterClientHandle {
     fn get_missing_updates_range(&self, workers_todo: &mut HashSet<usize>) -> Option<ProgressUpdatesRange>;
 
     /// Return a boxed clone of this handle.
-    fn boxed_clone(&self) -> Box<ProgcasterClientHandle>;
+    fn boxed_clone(&self) -> Box<dyn ProgcasterClientHandle>;
 }
 
-impl Clone for Box<ProgcasterClientHandle> {
+impl Clone for Box<dyn ProgcasterClientHandle> {
     fn clone(&self) -> Self {
         self.boxed_clone()
     }
@@ -485,7 +485,7 @@ impl<T: Timestamp> ProgcasterServerHandle for Rc<RefCell<Progcaster<T>>> {
         }
     }
 
-    fn boxed_clone(&self) -> Box<ProgcasterServerHandle> {
+    fn boxed_clone(&self) -> Box<dyn ProgcasterServerHandle> {
         Box::new(Rc::clone(&self))
     }
 }
@@ -565,7 +565,7 @@ impl<T: Timestamp> ProgcasterClientHandle for Rc<RefCell<Progcaster<T>>> {
         }
     }
 
-    fn boxed_clone(&self) -> Box<ProgcasterClientHandle> {
+    fn boxed_clone(&self) -> Box<dyn ProgcasterClientHandle> {
         Box::new(Rc::clone(&self))
     }
 }

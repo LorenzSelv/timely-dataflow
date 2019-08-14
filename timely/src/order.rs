@@ -44,8 +44,8 @@ macro_rules! implement_total {
     )
 }
 
-implement_partial!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, (), ::std::time::Duration,);
-implement_total!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, (), ::std::time::Duration,);
+implement_partial!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, (), ::std::time::Duration,);
+implement_total!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, (), ::std::time::Duration,);
 
 
 use std::fmt::{Formatter, Error, Debug};
@@ -136,4 +136,3 @@ impl Empty for () { }
 impl<T1: Empty, T2: Empty> Empty for Product<T1, T2> { }
 
 impl<T1, T2> TotalOrder for Product<T1, T2> where T1: Empty, T2: TotalOrder { }
-

@@ -39,7 +39,7 @@ use crate::rescaling::send_bootstrap_addr;
 use crate::rescaling::bootstrap::BootstrapRecvEndpoint;
 
 /// Returns a logger for communication events
-pub type LogSender = Box<Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>;
+pub type LogSender = Box<dyn Fn(CommunicationSetup)->Option<Logger<CommunicationEvent, CommunicationSetup>>+Send+Sync>;
 
 /// Initializes network connections
 pub fn initialize_networking(
