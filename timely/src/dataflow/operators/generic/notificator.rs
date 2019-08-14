@@ -79,7 +79,6 @@ impl<'a, T: Timestamp> Notificator<'a, T> {
     /// representing how many capabilities were requested for that specific timestamp.
     #[inline]
     pub fn for_each<F: FnMut(Capability<T>, u64, &mut Notificator<T>)>(&mut self, mut logic: F) {
-        println!("[for_each] frontier is {:?}", self.frontiers);
         while let Some((cap, count)) = self.next() {
             self.logging.as_ref().map(|l| l.log(crate::logging::GuardedProgressEvent { is_start: true }));
             logic(cap, count, self);

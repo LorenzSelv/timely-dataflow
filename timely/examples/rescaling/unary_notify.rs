@@ -28,6 +28,7 @@ fn main() {
                         let time = *cap.time();
                         output.session(&cap)
                               .give((time, index));
+                        std::thread::sleep(std::time::Duration::from_secs(1));
 
                         // downgrade capability.
                         cap.downgrade(&(time + 1));
@@ -38,7 +39,7 @@ fn main() {
                     else    { activator.activate(); }
                 }
             })
-            .exchange(|_| 0)
+            .exchange(|&x| x.0 as u64)
             .unary_notify(Pipeline, "hello", None, move |input, output, notificator| {
 
                 input.for_each(|cap, data| {
@@ -47,9 +48,8 @@ fn main() {
                     notificator.notify_at(cap.delayed(&next_time));
                 });
 
-                notificator.for_each(|time, count, _self| {
-                    println!("[W{}] notificator.for_each time={:?}, count={:?}", index, time.time(), count);
-                    std::thread::sleep(std::time::Duration::from_secs(1));
+                notificator.for_each(|_time, _count, _self| {
+                    // println!("[W{}] notificator.for_each time={:?}, count={:?}", index, time.time(), count);
                 });
             })
             .inspect_batch(move |t, x| println!("{}", format!("[W{}@inspect] seen {:?} at time {:?}", index, x, t).bold().red()));
