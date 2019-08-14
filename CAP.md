@@ -133,7 +133,7 @@ ALTERNATIVE
     - unordered input [DONE]
     - input handle [DONE]
     - probe [DONE]
-    - all usages of builder_raw [TODO]
+    - all usages of builder_raw [DONE]
 
 * All notifications are cancelled
 

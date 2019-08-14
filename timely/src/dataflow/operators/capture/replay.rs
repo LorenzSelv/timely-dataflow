@@ -70,11 +70,13 @@ where I : IntoIterator,
         let mut event_streams = self.into_iter().collect::<Vec<_>>();
         let mut started = false;
 
+        let is_rescaling = scope.is_rescaling();
+
         builder.build(
             move |_frontier| { },
             move |_consumed, internal, produced| {
 
-                if !started {
+                if !started && !is_rescaling {
                     // The first thing we do is modify our capabilities to match the number of streams we manage.
                     // This should be a simple change of `self.event_streams.len() - 1`. We only do this once, as
                     // our very first action.
