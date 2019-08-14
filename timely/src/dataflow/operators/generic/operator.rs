@@ -32,7 +32,7 @@ pub trait Operator<G: Scope, D1: Data> {
     ///     timely::example(|scope| {
     ///         (0u64..10).to_stream(scope)
     ///             .unary_frontier(Pipeline, "example", |default_cap, _info| {
-    ///                 let mut cap = Some(default_cap.delayed(&12));
+    ///                 let mut cap = Some(default_cap.unwrap().delayed(&12));
     ///                 let mut notificator = FrontierNotificator::new();
     ///                 let mut stash = HashMap::new();
     ///                 let mut vector = Vec::new();
@@ -59,7 +59,7 @@ pub trait Operator<G: Scope, D1: Data> {
     fn unary_frontier<D2, B, L, P>(&self, pact: P, name: &str, constructor: B) -> Stream<G, D2>
     where
         D2: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut FrontieredInputHandle<G::Timestamp, D1, P::Puller>,
                  &mut OutputHandle<G::Timestamp, D2, Tee<G::Timestamp, D2>>)+'static,
         P: ParallelizationContract<G::Timestamp, D1>;
@@ -114,7 +114,7 @@ pub trait Operator<G: Scope, D1: Data> {
     /// timely::example(|scope| {
     ///     (0u64..10).to_stream(scope)
     ///         .unary(Pipeline, "example", |default_cap, _info| {
-    ///             let mut cap = Some(default_cap.delayed(&12));
+    ///             let mut cap = Some(default_cap.unwrap().delayed(&12));
     ///             let mut vector = Vec::new();
     ///             move |input, output| {
     ///                 if let Some(ref c) = cap.take() {
@@ -131,7 +131,7 @@ pub trait Operator<G: Scope, D1: Data> {
     fn unary<D2, B, L, P>(&self, pact: P, name: &str, constructor: B) -> Stream<G, D2>
     where
         D2: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut InputHandle<G::Timestamp, D1, P::Puller>,
                  &mut OutputHandle<G::Timestamp, D2, Tee<G::Timestamp, D2>>)+'static,
         P: ParallelizationContract<G::Timestamp, D1>;
@@ -190,7 +190,7 @@ pub trait Operator<G: Scope, D1: Data> {
     where
         D2: Data,
         D3: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut FrontieredInputHandle<G::Timestamp, D1, P1::Puller>,
                  &mut FrontieredInputHandle<G::Timestamp, D2, P2::Puller>,
                  &mut OutputHandle<G::Timestamp, D3, Tee<G::Timestamp, D3>>)+'static,
@@ -267,7 +267,7 @@ pub trait Operator<G: Scope, D1: Data> {
     ///     let stream2 = (0u64..10).to_stream(scope);
     ///     (0u64..10).to_stream(scope)
     ///         .binary(&stream2, Pipeline, Pipeline, "example", |default_cap, _info| {
-    ///             let mut cap = Some(default_cap.delayed(&12));
+    ///             let mut cap = Some(default_cap.unwrap().delayed(&12));
     ///             let mut vector1 = Vec::new();
     ///             let mut vector2 = Vec::new();
     ///             move |input1, input2, output| {
@@ -290,7 +290,7 @@ pub trait Operator<G: Scope, D1: Data> {
     where
         D2: Data,
         D3: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut InputHandle<G::Timestamp, D1, P1::Puller>,
                  &mut InputHandle<G::Timestamp, D2, P2::Puller>,
                  &mut OutputHandle<G::Timestamp, D3, Tee<G::Timestamp, D3>>)+'static,
@@ -331,7 +331,7 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
     fn unary_frontier<D2, B, L, P>(&self, pact: P, name: &str, constructor: B) -> Stream<G, D2>
     where
         D2: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut FrontieredInputHandle<G::Timestamp, D1, P::Puller>,
                  &mut OutputHandle<G::Timestamp, D2, Tee<G::Timestamp, D2>>)+'static,
         P: ParallelizationContract<G::Timestamp, D1> {
@@ -365,8 +365,11 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
 
         self.unary_frontier(pact, name, move |capability, _info| {
             let mut notificator = FrontierNotificator::new();
-            for time in init {
-                notificator.notify_at(capability.delayed(&time));
+
+            if let Some(capability) = capability {
+                for time in init {
+                    notificator.notify_at(capability.delayed(&time));
+                }
             }
 
             let logging = self.scope().logging();
@@ -381,7 +384,7 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
     fn unary<D2, B, L, P>(&self, pact: P, name: &str, constructor: B) -> Stream<G, D2>
     where
         D2: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut InputHandle<G::Timestamp, D1, P::Puller>,
                  &mut OutputHandle<G::Timestamp, D2, Tee<G::Timestamp, D2>>)+'static,
         P: ParallelizationContract<G::Timestamp, D1> {
@@ -410,7 +413,7 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
     where
         D2: Data,
         D3: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut FrontieredInputHandle<G::Timestamp, D1, P1::Puller>,
                  &mut FrontieredInputHandle<G::Timestamp, D2, P2::Puller>,
                  &mut OutputHandle<G::Timestamp, D3, Tee<G::Timestamp, D3>>)+'static,
@@ -451,8 +454,11 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
 
         self.binary_frontier(other, pact1, pact2, name, |capability, _info| {
             let mut notificator = FrontierNotificator::new();
-            for time in init {
-                notificator.notify_at(capability.delayed(&time));
+
+            if let Some(capability) = capability {
+                for time in init {
+                    notificator.notify_at(capability.delayed(&time));
+                }
             }
 
             let logging = self.scope().logging();
@@ -470,7 +476,7 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
     where
         D2: Data,
         D3: Data,
-        B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+        B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
         L: FnMut(&mut InputHandle<G::Timestamp, D1, P1::Puller>,
                  &mut InputHandle<G::Timestamp, D2, P2::Puller>,
                  &mut OutputHandle<G::Timestamp, D3, Tee<G::Timestamp, D3>>)+'static,
@@ -530,15 +536,14 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
 ///
 /// timely::example(|scope| {
 ///
-///     source(scope, "Source", |capability, info| {
+///     source(scope, "Source", |mut capability, info| {
 ///
 ///         let activator = scope.activator_for(&info.address[..]);
 ///
-///         let mut cap = Some(capability);
 ///         move |output| {
 ///
 ///             let mut done = false;
-///             if let Some(cap) = cap.as_mut() {
+///             if let Some(cap) = capability.as_mut() {
 ///                 // get some data and send it.
 ///                 let time = cap.time().clone();
 ///                 output.session(&cap)
@@ -549,7 +554,7 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
 ///                 done = time > 20;
 ///             }
 ///
-///             if done { cap = None; }
+///             if done { capability = None; }
 ///             else    { activator.activate(); }
 ///         }
 ///     })
@@ -559,7 +564,7 @@ impl<G: Scope, D1: Data> Operator<G, D1> for Stream<G, D1> {
 pub fn source<G: Scope, D, B, L>(scope: &G, name: &str, constructor: B) -> Stream<G, D>
 where
     D: Data,
-    B: FnOnce(Capability<G::Timestamp>, OperatorInfo) -> L,
+    B: FnOnce(Option<Capability<G::Timestamp>>, OperatorInfo) -> L,
     L: FnMut(&mut OutputHandle<G::Timestamp, D, Tee<G::Timestamp, D>>)+'static {
 
     let mut builder = OperatorBuilder::new(name.to_owned(), scope.clone());

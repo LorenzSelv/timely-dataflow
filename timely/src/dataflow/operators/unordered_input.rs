@@ -56,11 +56,13 @@ pub trait UnorderedInput<G: Scope> {
     ///     let send = send.lock().unwrap().clone();
     ///
     ///     // create and capture the unordered input.
-    ///     let (mut input, mut cap) = worker.dataflow::<usize,_,_>(|scope| {
+    ///     let (mut input, cap) = worker.dataflow::<usize,_,_>(|scope| {
     ///         let (input, stream) = scope.new_unordered_input();
     ///         stream.capture_into(send);
     ///         input
     ///     });
+    ///
+    ///     let mut cap = cap.expect("missing capability");
     ///
     ///     // feed values 0..10 at times 0..10.
     ///     for round in 0..10 {
@@ -75,18 +77,17 @@ pub trait UnorderedInput<G: Scope> {
     ///     assert_eq!(extract[i], (i, vec![i]));
     /// }
     /// ```
-    fn new_unordered_input<D:Data>(&mut self) -> ((UnorderedHandle<G::Timestamp, D>, ActivateCapability<G::Timestamp>), Stream<G, D>);
+    fn new_unordered_input<D:Data>(&mut self) -> ((UnorderedHandle<G::Timestamp, D>, Option<ActivateCapability<G::Timestamp>>), Stream<G, D>);
 }
 
 
 impl<G: Scope> UnorderedInput<G> for G {
-    fn new_unordered_input<D:Data>(&mut self) -> ((UnorderedHandle<G::Timestamp, D>, ActivateCapability<G::Timestamp>), Stream<G, D>) {
+    fn new_unordered_input<D:Data>(&mut self) -> ((UnorderedHandle<G::Timestamp, D>, Option<ActivateCapability<G::Timestamp>>), Stream<G, D>) {
 
         let (output, registrar) = Tee::<G::Timestamp, D>::new();
         let internal = Rc::new(RefCell::new(ChangeBatch::new()));
-        // let produced = Rc::new(RefCell::new(ChangeBatch::new()));
-        // TODO(lorenzo) scope needs to keep an handle to this capability, so that it can change it (e.g. downgrade to the actual current time during bootstrap)
-        let cap = mint_capability(Default::default(), internal.clone());
+
+        let cap = if self.is_rescaling() { None } else { Some(mint_capability(Default::default(), internal.clone())) };
         let counter = PushCounter::new(output);
         let produced = counter.produced().clone();
         let peers = self.peers();
@@ -95,7 +96,7 @@ impl<G: Scope> UnorderedInput<G> for G {
         let mut address = self.addr();
         address.push(index);
 
-        let cap = ActivateCapability::new(cap, &address[..], self.activations().clone());
+        let cap = cap.map(|cap| ActivateCapability::new(cap, &address[..], self.activations().clone()));
 
         let helper = UnorderedHandle::new(counter);
 

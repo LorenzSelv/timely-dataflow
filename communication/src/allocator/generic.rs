@@ -69,6 +69,14 @@ impl Generic {
         }
     }
 
+    /// Indicates if the worker is joining the cluster
+    pub fn is_rescaling(&self) -> bool {
+        match self {
+            &Generic::ZeroCopy(ref z) => z.is_rescaling(),
+            _ => false,
+        }
+    }
+
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
@@ -136,6 +144,7 @@ impl Allocate for Generic {
     fn peers(&self) -> usize { self.peers() }
     fn inner_peers(&self) -> usize { self.inner_peers() }
     fn init_peers(&self) -> usize { self.init_peers() }
+    fn is_rescaling(&self) -> bool { self.is_rescaling() }
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {

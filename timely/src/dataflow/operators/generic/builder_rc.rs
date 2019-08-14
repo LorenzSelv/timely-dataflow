@@ -31,6 +31,7 @@ pub struct OperatorBuilder<G: Scope> {
     consumed: Vec<Rc<RefCell<ChangeBatch<G::Timestamp>>>>,
     internal: Rc<RefCell<Vec<Rc<RefCell<ChangeBatch<G::Timestamp>>>>>>,
     produced: Vec<Rc<RefCell<ChangeBatch<G::Timestamp>>>>,
+    is_rescaling: bool,
     logging: Option<Logger>,
 }
 
@@ -39,12 +40,14 @@ impl<G: Scope> OperatorBuilder<G> {
     /// Allocates a new generic operator builder from its containing scope.
     pub fn new(name: String, scope: G) -> Self {
         let logging = scope.logging();
+        let is_rescaling = scope.is_rescaling();
         OperatorBuilder {
             builder: OperatorBuilderRaw::new(name, scope),
             frontier: Vec::new(),
             consumed: Vec::new(),
             internal: Rc::new(RefCell::new(Vec::new())),
             produced: Vec::new(),
+            is_rescaling,
             logging,
         }
     }
@@ -100,7 +103,7 @@ impl<G: Scope> OperatorBuilder<G> {
     /// Creates an operator implementation from supplied logic constructor.
     pub fn build<B, L>(self, constructor: B)
     where
-        B: FnOnce(Vec<Capability<G::Timestamp>>) -> L,
+        B: FnOnce(Vec<Option<Capability<G::Timestamp>>>) -> L,
         L: FnMut(&[MutableAntichain<G::Timestamp>])+'static
     {
         // create capabilities, discard references to their creation.
@@ -113,9 +116,15 @@ impl<G: Scope> OperatorBuilder<G> {
             //               => mint cap for the default value
             //               => keep handle to the minted capability in the scope (we have a ref to it)
             //               => downgraded the capability later to the actual time (worker::bootstrap call)
-            capabilities.push(mint_capability(Default::default(), borrow.clone()));
-            // Discard evidence of creation, as we are assumed to start with one.
-            borrow.borrow_mut().clear();
+            // alternative: no capabilities at all, going with this for now
+            if self.is_rescaling {
+                capabilities.push(None);
+            } else {
+                let capability = mint_capability(Default::default(), borrow.clone());
+                capabilities.push(Some(capability));
+                // Discard evidence of creation, as we are assumed to start with one.
+                borrow.borrow_mut().clear();
+            }
         }
 
         let mut logic = constructor(capabilities);
@@ -202,6 +211,7 @@ mod tests {
             let (mut output2, _stream2) = builder.new_output::<()>();
 
             builder.build(move |capabilities| {
+                let capabilities = capabilities.into_iter().map(|cap| cap.unwrap()).collect::<Vec<_>>();
                 move |_frontiers| {
 
                     let mut output_handle1 = output1.activate();
@@ -231,7 +241,8 @@ mod tests {
             let (mut output1, _stream1) = builder.new_output::<()>();
             let (mut output2, _stream2) = builder.new_output::<()>();
 
-            builder.build(move |mut capabilities| {
+            builder.build(move |capabilities| {
+                let mut capabilities = capabilities.into_iter().map(|cap| cap.unwrap()).collect::<Vec<_>>();
                 move |_frontiers| {
 
                     let mut output_handle1 = output1.activate();

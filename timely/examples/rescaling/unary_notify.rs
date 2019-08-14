@@ -14,17 +14,16 @@ fn main() {
 
         worker.dataflow::<u32, _, _>(|scope| {
 
-            source(scope, "Source", |capability, info| {
+            source(scope, "Source", |mut capability, info| {
 
                 println!("[Source] initial cap is {:?}", capability);
 
                 let activator = scope.activator_for(&info.address[..]);
 
-                let mut cap = Some(capability);
                 move |output| {
 
                     let mut done = false;
-                    if let Some(cap) = cap.as_mut() {
+                    if let Some(cap) = capability.as_mut() {
                         // get some data and send it.
                         let time = *cap.time();
                         output.session(&cap)
@@ -35,7 +34,7 @@ fn main() {
                         done = time > 20;
                     }
 
-                    if done { cap = None; }
+                    if done { capability = None; }
                     else    { activator.activate(); }
                 }
             })

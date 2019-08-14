@@ -6,6 +6,7 @@ use crate::Data;
 use crate::dataflow::channels::Message;
 use crate::dataflow::operators::generic::operator::source;
 use crate::dataflow::{Stream, Scope};
+use crate::dataflow::operators::generic::OutputHandle;
 
 /// Converts to a timely `Stream`.
 pub trait ToStream<T: Timestamp, D: Data> {
@@ -31,25 +32,24 @@ pub trait ToStream<T: Timestamp, D: Data> {
 impl<T: Timestamp, I: IntoIterator+'static> ToStream<T, I::Item> for I where I::Item: Data {
     fn to_stream<S: Scope<Timestamp=T>>(self, scope: &mut S) -> Stream<S, I::Item> {
 
-        source(scope, "ToStream", |capability, info| {
+        source(scope, "ToStream", |mut capability, info| {
 
             // Acquire an activator, so that the operator can rescheduled itself.
             let activator = scope.activator_for(&info.address[..]);
 
             let mut iterator = self.into_iter().fuse();
-            let mut capability = Some(capability);
 
-            move |output| {
-
+            move |output: &mut OutputHandle<T, _, _>| {
                 if let Some(element) = iterator.next() {
-                    let mut session = output.session(capability.as_ref().unwrap());
-                    session.give(element);
-                    for element in iterator.by_ref().take((256 * Message::<T, I::Item>::default_length()) - 1) {
+                    if let Some(capability) = capability.as_ref() {
+                        let mut session = output.session(capability);
                         session.give(element);
+                        for element in iterator.by_ref().take((256 * Message::<T, I::Item>::default_length()) - 1) {
+                            session.give(element);
+                        }
+                        activator.activate();
                     }
-                    activator.activate();
-                }
-                else {
+                } else {
                     capability = None;
                 }
             }

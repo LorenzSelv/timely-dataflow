@@ -111,6 +111,7 @@ impl Allocate for Process {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
     fn inner_peers(&self) -> usize { self.peers }
+    fn is_rescaling(&self) -> bool { false }
     fn allocate<T: Any+Send+Sync+'static, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {

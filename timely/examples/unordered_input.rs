@@ -7,11 +7,13 @@ use timely_communication::Configuration;
 
 fn main() {
     timely::execute(Configuration::Thread, |worker| {
-        let (mut input, mut cap) = worker.dataflow::<usize,_,_>(|scope| {
+        let (mut input, cap) = worker.dataflow::<usize,_,_>(|scope| {
             let (input, stream) = scope.new_unordered_input();
             stream.inspect_batch(|t, x| println!("{:?} -> {:?}", t, x));
             input
         });
+
+        let mut cap = cap.expect("missing capability");
 
         for round in 0..10 {
             input.session(cap.clone()).give(round);

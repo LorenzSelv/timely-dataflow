@@ -77,8 +77,21 @@ pub fn initialize_networking(
                                    buzzer_rxs);
     });
 
+    let is_rescaling = bootstrap_info.is_some();
+
     let process_allocators = crate::allocator::process::Process::new_vector(threads);
-    let (builders, promises, futures) = new_vector(process_allocators, my_index, processes, init_processes, rescaler_rxs, buzzer_txs, bootstrap_recv_endpoints);
+
+    let (builders, promises, futures) =
+        new_vector(
+            process_allocators,
+            my_index,
+            processes,
+            init_processes,
+            rescaler_rxs,
+            buzzer_txs,
+            bootstrap_recv_endpoints,
+            is_rescaling,
+        );
 
     let mut promises_iter = promises.into_iter();
     let mut futures_iter = futures.into_iter();
@@ -91,7 +104,7 @@ pub fn initialize_networking(
 
         if let Some(mut stream) = results[index].take() {
 
-            // if this new timely process is joinin the cluster, communicate the selected bootstrap server
+            // if this new timely process is joining the cluster, communicate the selected bootstrap server
             // to all other worker processes before spawning send/recv threads.
             if let Some((bootstrap_server_index, bootstrap_addr)) = bootstrap_info {
                 send_bootstrap_addr(&mut stream, bootstrap_server_index, bootstrap_addr);

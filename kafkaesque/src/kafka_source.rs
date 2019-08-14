@@ -99,17 +99,16 @@ where
           &mut OutputHandle<G::Timestamp, D, Tee<G::Timestamp, D>>) -> bool+'static,
 {
     use timely::dataflow::operators::generic::source;
-    source(scope, name, move |capability, info| {
+    source(scope, name, move |mut capability, info| {
 
         let activator = scope.activator_for(&info.address[..]);
-        let mut cap = Some(capability);
 
         // define a closure to call repeatedly.
         move |output| {
 
             // Act only if we retain the capability to send data.
             let mut complete = false;
-            if let Some(mut capability) = cap.as_mut() {
+            if let Some(mut capability) = capability.as_mut() {
 
                 // Indicate that we should run again.
                 activator.activate();
@@ -131,7 +130,7 @@ where
                 }
             }
 
-            if complete { cap = None; }
+            if complete { capability = None; }
         }
 
     })

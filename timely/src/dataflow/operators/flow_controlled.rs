@@ -84,8 +84,7 @@ pub fn iterator_source<
         ) -> Stream<G, D> where G::Timestamp: TotalOrder {
 
     let mut target = Default::default();
-    source(scope, name, |cap, info| {
-        let mut cap = Some(cap);
+    source(scope, name, |mut cap, info| {
         let activator = scope.activator_for(&info.address[..]);
         move |output| {
             cap = cap.take().and_then(|mut cap| {

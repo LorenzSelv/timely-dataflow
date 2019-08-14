@@ -46,6 +46,9 @@ pub struct TcpBuilder<A: AllocateBuilder> {
     // the bootstrap client thread that is the performing the bootstrapping protocol
     // and broadcasting the encoded data received by the bootstrap server.
     bootstrap_recv_endpoint: Option<BootstrapRecvEndpoint>,
+
+    // indicates if the worker is joining the cluster
+    is_rescaling: bool,
 }
 
 /// Creates a vector of builders, sharing appropriate state.
@@ -67,7 +70,8 @@ pub fn new_vector<A: AllocateBuilder>(
     init_processes: usize,
     rescaler_rxs: Vec<Receiver<RescaleMessage>>,
     buzzer_txs: Vec<Sender<Buzzer>>,
-    bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>)
+    bootstrap_recv_endpoints: Vec<Option<BootstrapRecvEndpoint>>,
+    is_rescaling: bool)
 -> (Vec<TcpBuilder<A>>,
     Vec<Vec<Sender<MergeQueue>>>,
     Vec<Vec<Receiver<MergeQueue>>>)
@@ -98,6 +102,7 @@ pub fn new_vector<A: AllocateBuilder>(
                 rescaler_rx,
                 buzzer_tx,
                 bootstrap_recv_endpoint,
+                is_rescaling,
             }})
         .collect();
 
@@ -128,6 +133,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
             rescaler_rx: self.rescaler_rx,
             bootstrap_recv_endpoint: self.bootstrap_recv_endpoint,
             channels: Vec::new(),
+            is_rescaling: self.is_rescaling,
         }
     }
 }
@@ -184,6 +190,9 @@ pub struct TcpAllocator<A: Allocate> {
     // store channels allocated so far, so that we can back-fill them with
     // new pushers by calling the associated closur when a new worker process joins the cluster
     channels: Vec<(usize, Box<dyn OnNewPusherFn<()>>)>,
+
+    // indicates if the worker is joining the cluster
+    is_rescaling: bool,
 }
 
 impl<A: Allocate> Allocate for TcpAllocator<A> {
@@ -191,6 +200,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn peers(&self) -> usize { self.peers }
     fn inner_peers(&self) -> usize { self.inner.peers() }
     fn init_peers(&self) -> usize { self.init_peers }
+    fn is_rescaling(&self) -> bool { self.is_rescaling }
     fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_push: F) -> Box<Pull<Message<T>>>
         where F: OnNewPushFn<T>
     {

@@ -73,6 +73,8 @@ pub trait Allocate {
     /// The number of workers in the initial communication group.
     /// Defaults to peers, only in cluster mode with rescaling operations will change.
     fn init_peers(&self) -> usize { self.peers() }
+    /// Indicates if we are in rescaling mode
+    fn is_rescaling(&self) -> bool;
     /// Constructs several send endpoints and one receive endpoint.
     fn allocate<T: Data, F>(&mut self, identifier: usize, on_new_pusher: F) -> Box<Pull<Message<T>>>
          where F: OnNewPushFn<T>;

@@ -36,6 +36,8 @@ pub trait AsWorker : Scheduler {
     /// Number of peer workers in the initial configuration
     /// (differs from `peers()` only if a rescaling operation has occurred).
     fn init_peers(&self) -> usize;
+    /// Indicates if the worker is joining the cluster (rescaling mode)
+    fn is_rescaling(&self) -> bool;
     /// Allocates a new channel from a supplied identifier and address.
     ///
     /// The identifier is used to identify the underlying channel and route
@@ -94,6 +96,7 @@ impl<A: Allocate> AsWorker for Worker<A> {
     fn peers(&self) -> usize { self.allocator.borrow().peers() }
     fn init_peers(&self) -> usize { self.allocator.borrow().init_peers() }
     fn inner_peers(&self) -> usize { self.allocator.borrow().inner_peers() }
+    fn is_rescaling(&self) -> bool { self.allocator.borrow().is_rescaling() }
     fn allocate<D: Data, F>(&mut self, identifier: usize, address: &[usize], on_new_push: F) -> Box<Pull<Message<D>>>
         where F: OnNewPushFn<D>
     {

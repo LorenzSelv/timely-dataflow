@@ -126,13 +126,14 @@ ALTERNATIVE
 ===========
 
 * New worker has no capability at all!
+    - Change all APIs to accept an Option<Capability> instead: mint them only if *not* in rescale mode
+    - Is it enough to store a flag in the Scope?
+       - yes for operator 
+       - yes for unordered input
+       - TODO no for input handle?
 
 * All notifications are cancelled
 
-* `Capability` API should be changed to be a bit more defensive: invocations should not panic, but instead return some `Result<>`.
-    - Normal usage (no rescaling) can achieve the same effect by adding something like `.expect("cap operation failed")`
-    - Rescaling-oriented usage should handle error cases and do nothing if it has no capabilities.
-    
 * Operator, upon receiving input, are provided with capabilities (already in the current implementation) which allow them
   to produce output, request notifications, etc.
   

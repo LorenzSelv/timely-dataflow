@@ -122,7 +122,7 @@ impl<T: ExchangeData> Sequencer<T> {
             let mut counter = 0;
 
             // a source that attempts to pull from `recv` and produce commands for everyone
-            source(dataflow, "SequenceInput", move |capability, info| {
+            source(dataflow, "SequenceInput", move |mut capability, info| {
 
                 // intialize activator, now that we have the address
                 activator_source
@@ -132,38 +132,34 @@ impl<T: ExchangeData> Sequencer<T> {
                         catchup_until: None,
                     });
 
-                // so we can drop, if input queue vanishes.
-                let mut capability = Some(capability);
-
                 // closure broadcasts any commands it grabs.
                 move |output| {
 
                     if let Some(send_queue) = send_weak.upgrade() {
 
-                        // capability *should* still be non-None.
-                        let capability = capability.as_mut().expect("Capability unavailable");
+                        if let Some(capability) = &mut capability {
+                            // downgrade capability to current time.
+                            capability.downgrade(&timer.elapsed());
 
-                        // downgrade capability to current time.
-                        capability.downgrade(&timer.elapsed());
-
-                        // drain and broadcast `send`.
-                        let mut session = output.session(&capability);
-                        let mut borrow = send_queue.borrow_mut();
-                        for element in borrow.drain(..) {
-                            for worker_index in 0 .. peers {
-                                session.give((worker_index, counter, element.clone()));
+                            // drain and broadcast `send`.
+                            let mut session = output.session(&capability);
+                            let mut borrow = send_queue.borrow_mut();
+                            for element in borrow.drain(..) {
+                                for worker_index in 0..peers {
+                                    session.give((worker_index, counter, element.clone()));
+                                }
+                                counter += 1;
                             }
-                            counter += 1;
-                        }
 
-                        let mut activator_borrow = activator_source.borrow_mut();
-                        let mut activator = activator_borrow.as_mut().unwrap();
+                            let mut activator_borrow = activator_source.borrow_mut();
+                            let mut activator = activator_borrow.as_mut().unwrap();
 
-                        if let Some(t) = activator.catchup_until {
-                            if capability.time().less_than(&t) {
-                                activator.activate();
-                            } else {
-                                activator.catchup_until = None;
+                            if let Some(t) = activator.catchup_until {
+                                if capability.time().less_than(&t) {
+                                    activator.activate();
+                                } else {
+                                    activator.catchup_until = None;
+                                }
                             }
                         }
                     } else {
