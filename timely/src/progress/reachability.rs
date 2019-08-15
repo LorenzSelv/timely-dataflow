@@ -456,10 +456,10 @@ impl<T:Timestamp> Tracker<T> {
 
     /// Indicates if any pointstamps have positive count.
     pub fn tracking_anything(&mut self) -> bool {
-        eprintln!("  tracker:");
-        eprintln!("    total_counts={}", self.total_counts);
-        eprintln!("    source_changes={:?}", self.source_changes);
-        eprintln!("    target_changes={:?}", self.target_changes);
+//        eprintln!("  tracker:");
+//        eprintln!("    total_counts={}", self.total_counts);
+//        eprintln!("    source_changes={:?}", self.source_changes);
+//        eprintln!("    target_changes={:?}", self.target_changes);
         !self.source_changes.is_empty() ||
         !self.target_changes.is_empty() ||
         self.total_counts > 0
