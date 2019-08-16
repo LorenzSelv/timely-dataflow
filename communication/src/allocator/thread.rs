@@ -28,6 +28,7 @@ pub struct Thread {
 impl Allocate for Thread {
     fn index(&self) -> usize { 0 }
     fn peers(&self) -> usize { 1 }
+    fn peers_rc(&self) -> Rc<RefCell<usize>> { Rc::new(RefCell::new(1)) }
     fn inner_peers(&self) -> usize { 1 }
     fn is_rescaling(&self) -> bool { false }
     fn allocate<T: 'static, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<dyn Pull<Message<T>>>

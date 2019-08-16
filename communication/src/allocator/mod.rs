@@ -68,6 +68,8 @@ pub trait Allocate {
     fn index(&self) -> usize;
     /// The number of workers in the communication group.
     fn peers(&self) -> usize;
+    /// The number of workers in the communication group.
+    fn peers_rc(&self) -> Rc<RefCell<usize>>;
     /// The number of workers per process in the communication group.
     fn inner_peers(&self) -> usize;
     /// The number of workers in the initial communication group.

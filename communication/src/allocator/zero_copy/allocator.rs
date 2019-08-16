@@ -123,7 +123,7 @@ impl<A: AllocateBuilder> TcpBuilder<A> {
         TcpAllocator {
             inner: self.inner.build(),
             index: self.index,
-            peers: self.peers,
+            peers: Rc::new(RefCell::new(self.peers)),
             init_peers: self.init_peers,
             canaries: Rc::new(RefCell::new(Vec::new())),
             staged: Vec::new(),
@@ -168,7 +168,7 @@ pub struct TcpAllocator<A: Allocate> {
     inner:      A,                          // A non-serialized inner allocator for process-local peers.
 
     index:      usize,                      // number out of peers
-    peers:      usize,                      // number of peer allocators (for typed channel allocation).
+    peers:      Rc<RefCell<usize>>,                      // number of peer allocators (for typed channel allocation).
     init_peers: usize,                      // number of peer allocators in the initial configuration (before any rescaling operation)
 
     staged:     Vec<Bytes>,                 // staging area for incoming Bytes
@@ -197,7 +197,8 @@ pub struct TcpAllocator<A: Allocate> {
 
 impl<A: Allocate> Allocate for TcpAllocator<A> {
     fn index(&self) -> usize { self.index }
-    fn peers(&self) -> usize { self.peers }
+    fn peers(&self) -> usize { *self.peers.borrow() }
+    fn peers_rc(&self) -> Rc<RefCell<usize>> { Rc::clone(&self.peers) }
     fn inner_peers(&self) -> usize { self.inner.peers() }
     fn init_peers(&self) -> usize { self.init_peers }
     fn is_rescaling(&self) -> bool { self.is_rescaling }
@@ -316,7 +317,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
             // back-fill existing channels with `threads` new pushers pointing to the new send
             let threads = self.inner.peers();
             let self_index = self.index;
-            let self_peers = self.peers;
+            let self_peers = self.peers();
 
             for (channel_id, on_new_pusher) in self.channels.iter_mut() {
 
@@ -343,7 +344,7 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
             // the new process adds `threads` new workers to the cluster
             // TODO(lorenzo) without routing tables..?
-            self.peers += threads;
+            *self.peers.borrow_mut() += threads;
 
             // make sure all progress messages, including the bootstrap message (signaling last seqno sent),
             // are received by the new worker process.

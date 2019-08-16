@@ -49,6 +49,17 @@ impl Generic {
         }
     }
 
+    /// The number of workers in a mutable reference.
+    /// The caller is not meant to change the value inside.
+    pub fn peers_rc(&self) -> Rc<RefCell<usize>> {
+        match self {
+            &Generic::Thread(ref t) => t.peers_rc(),
+            &Generic::Process(ref p) => p.peers_rc(),
+            &Generic::ProcessBinary(ref pb) => pb.peers_rc(),
+            &Generic::ZeroCopy(ref z) => z.peers_rc(),
+        }
+    }
+
     /// The number of workers per process.
     pub fn inner_peers(&self) -> usize {
         match self {
@@ -142,6 +153,7 @@ impl Generic {
 impl Allocate for Generic {
     fn index(&self) -> usize { self.index() }
     fn peers(&self) -> usize { self.peers() }
+    fn peers_rc(&self) -> Rc<RefCell<usize>> { self.peers_rc() }
     fn inner_peers(&self) -> usize { self.inner_peers() }
     fn init_peers(&self) -> usize { self.init_peers() }
     fn is_rescaling(&self) -> bool { self.is_rescaling() }

@@ -119,6 +119,7 @@ pub struct ProcessAllocator {
 impl Allocate for ProcessAllocator {
     fn index(&self) -> usize { self.index }
     fn peers(&self) -> usize { self.peers }
+    fn peers_rc(&self) -> Rc<RefCell<usize>> { Rc::new(RefCell::new(self.peers)) }
     fn inner_peers(&self) -> usize { self.peers }
     fn is_rescaling(&self) -> bool { false }
     fn allocate<T: Data, F>(&mut self, identifier: usize, mut on_new_pusher: F) -> Box<dyn Pull<Message<T>>>
