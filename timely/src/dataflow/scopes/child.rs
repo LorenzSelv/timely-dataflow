@@ -57,6 +57,7 @@ where
 {
     fn index(&self) -> usize { self.parent.index() }
     fn peers(&self) -> usize { self.parent.peers() }
+    fn peers_rc(&self) -> Rc<RefCell<usize>> { self.parent.peers_rc() }
     fn init_peers(&self) -> usize { self.parent.init_peers() }
     fn inner_peers(&self) -> usize { self.parent.inner_peers() }
     fn is_rescaling(&self) -> bool { self.parent.is_rescaling() }

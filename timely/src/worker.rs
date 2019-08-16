@@ -32,6 +32,8 @@ pub trait AsWorker : Scheduler {
     /// Number of peer workers.
     fn peers(&self) -> usize;
     /// Number of peers workers per process.
+    fn peers_rc(&self) -> Rc<RefCell<usize>>;
+    /// Number of peers workers per process.
     fn inner_peers(&self) -> usize;
     /// Number of peer workers in the initial configuration
     /// (differs from `peers()` only if a rescaling operation has occurred).
@@ -94,6 +96,7 @@ pub struct Worker<A: Allocate> {
 impl<A: Allocate> AsWorker for Worker<A> {
     fn index(&self) -> usize { self.allocator.borrow().index() }
     fn peers(&self) -> usize { self.allocator.borrow().peers() }
+    fn peers_rc(&self) -> Rc<RefCell<usize>> { self.allocator.borrow().peers_rc() }
     fn init_peers(&self) -> usize { self.allocator.borrow().init_peers() }
     fn inner_peers(&self) -> usize { self.allocator.borrow().inner_peers() }
     fn is_rescaling(&self) -> bool { self.allocator.borrow().is_rescaling() }
