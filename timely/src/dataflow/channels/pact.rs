@@ -14,6 +14,7 @@ use crate::communication::allocator::thread::{ThreadPusher, ThreadPuller};
 
 use crate::worker::AsWorker;
 use crate::dataflow::channels::pushers::Exchange as ExchangePusher;
+use crate::dataflow::channels::pushers::Broadcast as BroadcastPusher;
 use super::{Bundle, Message};
 
 use crate::logging::TimelyLogger as Logger;
@@ -82,28 +83,31 @@ impl<T: Eq+Data+Clone, D: Data+Clone, F: FnMut(&D)->u64+'static> Parallelization
     }
 }
 
-// /// An exchange between multiple observers by time and data
-// pub struct TimeExchange<D, T, F: Fn(&T, &D)->u64+'static> { hash_func: F, phantom: PhantomData<(T, D)>, }
-// impl<D, T, F: Fn(&T, &D)->u64> TimeExchange<D, T, F> {
-//     /// Allocates a new `TimeExchange` pact from a distribution function.
-//     pub fn new(func: F) -> TimeExchange<D, T, F> {
-//         TimeExchange {
-//             hash_func:  func,
-//             phantom:    PhantomData,
-//         }
-//     }
-// }
+/// A broadcast to all observers
+pub struct Broadcast;
 
-// impl<T: Eq+Data+Clone, D: Data+Clone, F: Fn(&T, &D)->u64+'static> ParallelizationContract<T, D> for TimeExchange<D, T, F> {
-//     type Pusher = ExchangePusher<T, D, Pusher<T, D, Box<Push<CommMessage<Message<T, D>>>>>, F>;
-//     type Puller = Puller<T, D, Box<Pull<CommMessage<Message<T, D>>>>>;
-//     fn connect<A: AsWorker>(self, allocator: &mut A, identifier: usize, logging: Logger) -> (Self::Pusher, Self::Puller) {
-//         let (senders, receiver, channel_id) = allocator.allocate::<Message<T, D>>();
-//         let senders = senders.into_iter().enumerate().map(|(i,x)| Pusher::new(x, allocator.index(), i, identifier, channel_id, logging.clone())).collect::<Vec<_>>();
-//         (ExchangePusher::new(senders, self.hash_func), Puller::new(receiver, allocator.index(), identifier, channel_id, logging.clone()))
-//     }
-// }
+impl<T: Eq+Data+Clone, D: Data+Clone> ParallelizationContract<T, D> for Broadcast {
+    type Pusher = Box<dyn Push<Bundle<T, D>>>;
+    type Puller = Box<dyn Pull<Bundle<T, D>>>;
+    fn connect<A: AsWorker>(self, allocator: &mut A, identifier: usize, address: &[usize], logging: Option<Logger>) -> (Self::Pusher, Self::Puller) {
+        let pushers1 = Rc::new(RefCell::new(Vec::with_capacity(allocator.peers())));
+        let pushers2 = Rc::clone(&pushers1);
 
+        let source_idx = allocator.index();
+        let mut target_idx = allocator.peers(); // ASSUMPTION: next target_index is the number of peers
+        let logging_clone = logging.clone();
+
+        let on_new_pusher = move |pusher| {
+            let pusher = LogPusher::new(pusher, source_idx, target_idx, identifier, logging_clone.clone());
+            target_idx += 1;
+            pushers1.borrow_mut().push(pusher);
+        };
+
+        let receiver = allocator.allocate::<Message<T, D>, _>(identifier, address, on_new_pusher);
+        // let senders = senders.into_iter().enumerate().map(|(i,x)| LogPusher::new(x, allocator.index(), i, identifier, logging.clone())).collect::<Vec<_>>();
+        (Box::new(BroadcastPusher::new(pushers2)), Box::new(LogPuller::new(receiver, allocator.index(), identifier, logging.clone())))
+    }
+}
 
 /// Wraps a `Message<T,D>` pusher to provide a `Push<(T, Content<D>)>`.
 pub struct LogPusher<T, D, P: Push<Bundle<T, D>>> {

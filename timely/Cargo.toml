@@ -51,3 +51,7 @@ path="examples/rescaling/unary.rs"
 [[example]]
 name="rescaling_unary_notify"
 path="examples/rescaling/unary_notify.rs"
+
+[[example]]
+name="rescaling_broadcast"
+path="examples/rescaling/broadcast.rs"
