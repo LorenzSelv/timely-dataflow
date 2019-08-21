@@ -341,9 +341,6 @@ impl<T: Timestamp> FrontierNotificator<T> {
         if self.available.is_empty() {
             self.make_available(frontiers);
         }
-        // TODO(lorenzo) need to distinguish between capability time and notification time
-        //               since the capability could be downgraded/revoked
-        // self.available.filter(|x| !x.element.revoked() && x.element.time() == notify_time);
         self.available.pop().map(|front| {
             while self.available.peek() == Some(&front) { self.available.pop(); }
             front.element

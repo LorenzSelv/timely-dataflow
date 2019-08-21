@@ -102,11 +102,10 @@ impl<G: Scope> Input for G where <G as ScopeParent>::Timestamp: TotalOrder {
         (handle, stream)
     }
 
-    // TODO(lorenzo) replace output stream with `empty` ?
     fn input_from<D: Data>(&mut self, handle: &mut Handle<<G as ScopeParent>::Timestamp, D>) -> Stream<G, D> {
 
         if self.is_rescaling() {
-            // new worker joining the cluster are not allowed to inject input for now
+            // new workers joining the cluster are not allowed to inject input for now
             empty(&self)
         } else {
             let (output, registrar) = Tee::<<G as ScopeParent>::Timestamp, D>::new();

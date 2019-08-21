@@ -344,6 +344,8 @@ impl<A: Allocate> Allocate for TcpAllocator<A> {
 
             // the new process adds `threads` new workers to the cluster
             // TODO(lorenzo) without routing tables..?
+            //     If not using Megaphone, tuple will be sent to worker according to the new modulo.
+            //     This might be fine for some operators with no state, but users should be very aware of this.
             *self.peers.borrow_mut() += threads;
 
             // make sure all progress messages, including the bootstrap message (signaling last seqno sent),

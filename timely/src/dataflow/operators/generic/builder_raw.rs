@@ -73,10 +73,8 @@ impl<G: Scope> OperatorBuilder<G> {
         let index = scope.allocate_operator_index();
         let mut address = scope.addr();
         address.push(index);
-        // TODO(lorenzo) this could be reverted to `peers` ?
+        // could this be reverted to `peers` ? NO, new worker has no capabilities
         let init_peers = scope.init_peers();
-
-//        eprintln!("Operator shape has init_peers = {}", init_peers);
 
         OperatorBuilder {
             scope,

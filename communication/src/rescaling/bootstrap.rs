@@ -185,8 +185,6 @@ pub fn bootstrap_worker_client(source_address: SocketAddrV4, bootstrap_send_endp
     // cache the range results so we avoid unnecessary request to the bootstrap server
     let mut range_cache = HashMap::<ProgressUpdatesRange, Vec<u8>>::new();
 
-    // TODO(lorenzo) every worker in this process is asking for the same updates!
-    //               send the request only once and cache the result
     for endpoint in bootstrap_send_endpoints.iter() {
 
         // the worker thread will drop the tx endpoint when it has no more range requests

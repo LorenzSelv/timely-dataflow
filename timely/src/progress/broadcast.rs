@@ -12,13 +12,13 @@ use abomonation::Abomonation;
 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// TODO(lorenzo) make private again
+/// State of the progress tracker
 pub struct ProgressState<T: Timestamp> {
     /// compacted ChangeBatch: all updates ever sent/recved accumulated
-    pub acc_updates: ChangeBatch<(Location, T)>,
+    acc_updates: ChangeBatch<(Location, T)>,
 
     /// delta ChangeBatch: cleared every time progcaster.recv() is called
-    pub delta_updates: ChangeBatch<(Location, T)>,
+    delta_updates: ChangeBatch<(Location, T)>,
 
     /// hashmap of (worker_index) -> SeqNo
     ///                 ^source in the message

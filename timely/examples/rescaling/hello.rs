@@ -24,10 +24,6 @@ fn main() {
         let mut input = InputHandle::new();
         let mut probe = ProbeHandle::new();
 
-        // TODO(lorenzo)
-        //    capability semantics:
-        //         timely/src/dataflow/operators/generic/builder_rc.rs:110  -- is this fine in join mode ?
-
         // create a new input, exchange data, and inspect its output
         worker.dataflow(|scope| {
             scope.input_from(&mut input)
