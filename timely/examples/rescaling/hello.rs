@@ -28,8 +28,7 @@ fn main() {
         worker.dataflow(|scope| {
             scope.input_from(&mut input)
                  .exchange(|x| *x)
-                 .exchange(|x| *x+1)
-                 .inspect(move |x| println!("worker {}:\thello {}", index, x))
+                 .inspect(move |x| println!("worker {}: seen {}", index, x))
                  .probe_with(&mut probe);
         });
 
@@ -50,7 +49,5 @@ fn main() {
                 worker.step();
             }
         }
-
-        println!("Done!");
     }).unwrap();
 }

@@ -9,7 +9,7 @@ use crate::order::PartialOrder;
 /// This antichain implementation allows you to repeatedly introduce elements to the antichain, and
 /// which will evict larger elements to maintain the *minimal* antichain, those incomparable elements
 /// no greater than any other element.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Abomonation, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Antichain<T> {
     elements: Vec<T>
 }
